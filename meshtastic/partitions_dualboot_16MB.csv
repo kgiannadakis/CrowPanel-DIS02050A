@@ -1,4 +1,4 @@
-# Dual-Boot Partition Table — CrowPanel DIS05020A (16MB flash)
+# Dual-Boot Partition Table — CrowPanel DIS02050A (16MB flash)
 # factory = boot selector, ota_0 = MeshCore, ota_1 = Meshtastic
 # Name,         Type, SubType, Offset,    Size,     Flags
 nvs,            data, nvs,     0x9000,    0x10000,

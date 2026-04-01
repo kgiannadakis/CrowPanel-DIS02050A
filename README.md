@@ -17,9 +17,9 @@
 
 <p align="center">
   <a href="https://www.elecrow.com/crowpanel-advance-5-0-hmi-esp32-ai-display-800x480-ips-artificial-intelligent-touch-screen.html">
-    <img src="docs/images/crowpanel-front.jpg" width="300" alt="CrowPanel Advance 5.0">
-    &nbsp;&nbsp;&nbsp;
-    <img src="docs/images/crowpanel-back.jpg" width="300" alt="CrowPanel Advance 5.0 Back">
+    <img src="docs/images/crowpanel-front.jpg" width="380" alt="CrowPanel Advance 5.0 Front">
+    &nbsp;&nbsp;
+    <img src="docs/images/crowpanel-back.jpg" width="380" alt="CrowPanel Advance 5.0 PCB">
   </a>
 </p>
 
@@ -43,7 +43,7 @@ This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh comm
 
 | Firmware | Description |
 |----------|-------------|
-| **MeshCore** | Feature-rich mesh chat with a dark-themed LVGL touchscreen UI built entirely from scratch, including original features and WiFi functionality (Telegram bridge, web dashboard). |
+| **MeshCore** | Feature-rich mesh chat with a dark-themed LVGL touchscreen UI built entirely from scratch, with original features and WiFi functionality (Telegram bridge, web dashboard, web interface for PC control). |
 | **Meshtastic** | The popular open-source LoRa mesh platform, ported with minimum changes to work with the CrowPanel's wiring. Due to wiring constraints, some features (e.g. maps) do not work. |
 | **Boot Selector** | Simple touchscreen menu at startup to pick your firmware. Remembers your last choice. |
 
@@ -56,23 +56,10 @@ This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh comm
 | **Custom UI** | Built from scratch with LVGL 8.3 — dark theme, portrait & landscape, Greek/English keyboards |
 | **Private Messages** | Per-message delivery tracking with automatic retries |
 | **Channels** | Group messaging with receipt confirmation |
-| **Telegram Bridge** | Channels forwarded to group topics, PMs to private bot chat, bidirectional messaging |
-| **Web Dashboard** | Browser-based monitoring and messaging over WiFi |
+| **Web Interface** | Full web dashboard accessible from any browser on your PC or phone — view contacts, channels, messages, and send/receive over WiFi |
+| **Telegram Bridge** | Channels forwarded to group topics, PMs to private bot chat, bidirectional messaging from Telegram |
 | **Contacts & Repeaters** | Full contact and repeater management with signal routing |
-| **WiFi + NTP** | Time sync and connectivity for all bridge features |
-
----
-
-## Repository Structure
-
-```
-CrowPanel-DIS02050A/
-├── meshcore/        MeshCore firmware (PlatformIO project)
-├── meshtastic/      Meshtastic firmware (PlatformIO project)
-├── selector/        Boot selector firmware (PlatformIO project)
-├── flash_all.py     Build & flash all three in one step
-└── LICENSE          GPL-3.0
-```
+| **WiFi + NTP** | Time sync and connectivity for all bridge and web features |
 
 ---
 
@@ -83,6 +70,14 @@ CrowPanel-DIS02050A/
 - [PlatformIO](https://platformio.org/) (CLI or VS Code extension)
 - Python 3 (included with PlatformIO)
 - USB-C cable
+
+### Hardware Setup
+
+> **Important: Antenna Pigtail Cable**
+>
+> Route the LoRa antenna pigtail cable **outside the board** (not folded over the PCB). Keeping the cable away from the electronics significantly reduces floor noise and improves radio performance.
+>
+> After flashing, use the **Floor Noise** function in the settings to tune and verify your noise level. A lower floor noise means better receive sensitivity and longer range.
 
 ### Flash Everything
 
@@ -106,6 +101,23 @@ pio run -d meshtastic -e crowpanel-dis05020a-v11
 
 ---
 
+## Web Interface
+
+MeshCore includes a built-in web dashboard for controlling your node from a PC or phone browser:
+
+1. Enable WiFi on the CrowPanel (**Web Apps** screen)
+2. Enable the **Web Dashboard** toggle
+3. Open `http://<device-ip>` in any browser on the same network
+
+From the web interface you can:
+- View all contacts, channels, and repeaters
+- Read message history
+- Send private messages and channel messages
+- Monitor device status (uptime, signal, battery)
+- Delete repeaters
+
+---
+
 ## Telegram Bridge
 
 Bridge your mesh conversations to Telegram with organized threading:
@@ -123,6 +135,19 @@ Bridge your mesh conversations to Telegram with organized threading:
 
 ---
 
+## Repository Structure
+
+```
+CrowPanel-DIS02050A/
+├── meshcore/        MeshCore firmware (PlatformIO project)
+├── meshtastic/      Meshtastic firmware (PlatformIO project)
+├── selector/        Boot selector firmware (PlatformIO project)
+├── flash_all.py     Build & flash all three in one step
+└── LICENSE          GPL-3.0
+```
+
+---
+
 ## Acknowledgments
 
 - [Meshtastic](https://meshtastic.org/) — Open-source LoRa mesh networking
@@ -135,6 +160,12 @@ Bridge your mesh conversations to Telegram with organized threading:
 ## License
 
 This project is licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE).
+
+---
+
+## Disclaimer
+
+I am not a professional programmer. This project is the result of a lot of hard work, manual patches, use of AI tools, and trial and error. Expect some functions not to be perfect — if you find issues, feel free to open an issue or submit a fix!
 
 ---
 

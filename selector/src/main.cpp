@@ -163,7 +163,7 @@ static void draw_ui(bool ota0_ok, bool ota1_ok) {
     // Footer
     gfx.setTextDatum(lgfx::bottom_center);
     gfx.setTextColor(0x555555);
-    gfx.drawString("Version 1.0, 22-03-2026  |  Copyright 2026, Kostis Giannadakis", 400, 470);
+    gfx.drawString("Version 1.0, 01/04/2026  |  Baked by Kostis Giannadakis", 400, 470);
 }
 
 static void draw_countdown(int secs, int slot) {

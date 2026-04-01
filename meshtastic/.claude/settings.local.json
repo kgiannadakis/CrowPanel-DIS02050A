@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/Kostis/Documents/PlatformIO/Projects/Meshtastic_CrowPanel_v11 -name *crowpanel* -o -name *backlight*)",
+      "Bash(grep -E \"\\\\.\\(cpp|h|ini|csv\\)$\")",
+      "Bash(~/.platformio/penv/Scripts/pio run:*)",
+      "Bash(ls C:UsersKostis.platformiopenvScripts *)",
+      "Bash(pip show:*)",
+      "Bash(cmd.exe /c \"where pio\")",
+      "Bash(cmd.exe /c \"where platformio\")",
+      "Bash(find /c/Users/Kostis/Documents/PlatformIO/Projects/Meshtastic_CrowPanel_v11/src/graphics -type f -name *.cpp -o -name *.h)",
+      "Bash(grep -r decomposeTime /c/Users/Kostis/Documents/PlatformIO/Projects/Meshtastic_CrowPanel_v11/src --include=*.h --include=*.cpp)",
+      "Bash(find C:/Users/Kostis/Documents/PlatformIO/Projects/Meshtastic_CrowPanel_v11/.pio -name esp32-hal*.h)",
+      "Bash(where pio:*)",
+      "Bash(pio run:*)"
+    ]
+  }
+}

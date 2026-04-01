@@ -17,13 +17,9 @@
 
 <p align="center">
   <a href="https://www.elecrow.com/crowpanel-advance-5-0-hmi-esp32-ai-display-800x480-ips-artificial-intelligent-touch-screen.html">
-    <img src="https://www.elecrow.com/media/catalog/product/cache/5cc12f0c36ec3515a1639c4df6af2890/d/i/dis02050a-_1_.jpg" width="400" alt="CrowPanel Advance 5.0">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://www.elecrow.com/crowpanel-advance-5-0-hmi-esp32-ai-display-800x480-ips-artificial-intelligent-touch-screen.html">
-    <img src="https://www.elecrow.com/media/catalog/product/cache/5cc12f0c36ec3515a1639c4df6af2890/d/i/dis02050a-_2_.jpg" width="400" alt="CrowPanel Advance 5.0 Back">
+    <img src="docs/images/crowpanel-front.jpg" width="300" alt="CrowPanel Advance 5.0">
+    &nbsp;&nbsp;&nbsp;
+    <img src="docs/images/crowpanel-back.jpg" width="300" alt="CrowPanel Advance 5.0 Back">
   </a>
 </p>
 

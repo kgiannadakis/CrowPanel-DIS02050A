@@ -1,28 +1,55 @@
 <p align="center">
-  <h1 align="center">CrowPanel DIS02050A<br>Dual-Boot LoRa Mesh Firmware</h1>
+  <h1 align="center">CrowPanel Advance 5" (DIS02050A v1.1)<br>Dual-Boot LoRa Mesh Firmware</h1>
   <p align="center">
     Run <b>MeshCore</b> or <b>Meshtastic</b> on your CrowPanel — switch at boot, no reflashing.
   </p>
   <p align="center">
     <img src="https://img.shields.io/badge/ESP32--S3-LoRa_Mesh-blue?style=flat-square" alt="ESP32-S3">
-    <img src="https://img.shields.io/badge/display-7%22_800x480-green?style=flat-square" alt="Display">
+    <img src="https://img.shields.io/badge/display-5%22_800x480-green?style=flat-square" alt="Display">
     <img src="https://img.shields.io/badge/radio-SX1262-orange?style=flat-square" alt="SX1262">
     <img src="https://img.shields.io/badge/license-GPL--3.0-red?style=flat-square" alt="License">
-    <img src="https://img.shields.io/github/v/release/kgiannadakis/CrowPanel-DIS02050A?style=flat-square&label=firmware" alt="Release">
   </p>
 </p>
 
 ---
 
+## Hardware
+
+<p align="center">
+  <a href="https://www.elecrow.com/crowpanel-advance-5-0-hmi-esp32-ai-display-800x480-ips-artificial-intelligent-touch-screen.html">
+    <img src="https://www.elecrow.com/media/catalog/product/cache/5cc12f0c36ec3515a1639c4df6af2890/d/i/dis02050a-_1_.jpg" width="400" alt="CrowPanel Advance 5.0">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://www.elecrow.com/crowpanel-advance-5-0-hmi-esp32-ai-display-800x480-ips-artificial-intelligent-touch-screen.html">
+    <img src="https://www.elecrow.com/media/catalog/product/cache/5cc12f0c36ec3515a1639c4df6af2890/d/i/dis02050a-_2_.jpg" width="400" alt="CrowPanel Advance 5.0 Back">
+  </a>
+</p>
+
+<p align="center">
+  <b>Elecrow CrowPanel Advance 5.0" HMI</b> — <a href="https://www.elecrow.com/crowpanel-advance-5-0-hmi-esp32-ai-display-800x480-ips-artificial-intelligent-touch-screen.html">Product Page</a>
+</p>
+
+| Component | Specification |
+|-----------|--------------|
+| **Board** | Elecrow CrowPanel Advance 5.0" (DIS02050A v1.1) |
+| **MCU** | ESP32-S3 (8MB Flash, PSRAM) |
+| **Display** | 5" 800x480 IPS, capacitive touch (GT911) |
+| **Radio** | SX1262 LoRa transceiver |
+| **Connectivity** | WiFi + Bluetooth (built-in) |
+
+---
+
 ## Overview
 
-This project turns the **Elecrow CrowPanel 7.0"** into a standalone LoRa mesh communicator with a full touchscreen UI. A boot selector lets you choose which firmware to run at startup — no cables, no reflashing.
+This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh communicator with a full touchscreen UI. A boot selector lets you choose which firmware to run at startup — no cables, no reflashing.
 
 | Firmware | Description |
 |----------|-------------|
-| **MeshCore** | Feature-rich mesh chat with dark-themed LVGL UI, Telegram bridge, web dashboard, and OTA updates |
-| **Meshtastic** | The popular open-source LoRa mesh platform, ported to the CrowPanel display |
-| **Boot Selector** | Touchscreen menu at startup to pick your firmware |
+| **MeshCore** | Feature-rich mesh chat with a dark-themed LVGL touchscreen UI built entirely from scratch, including original features and WiFi functionality (Telegram bridge, web dashboard). |
+| **Meshtastic** | The popular open-source LoRa mesh platform, ported with minimum changes to work with the CrowPanel's wiring. Due to wiring constraints, some features (e.g. maps) do not work. |
+| **Boot Selector** | Simple touchscreen menu at startup to pick your firmware. Remembers your last choice. |
 
 ---
 
@@ -30,26 +57,13 @@ This project turns the **Elecrow CrowPanel 7.0"** into a standalone LoRa mesh co
 
 | Feature | Details |
 |---------|---------|
-| **Chat UI** | LVGL 8.3 dark theme, portrait & landscape, Greek/English keyboards |
+| **Custom UI** | Built from scratch with LVGL 8.3 — dark theme, portrait & landscape, Greek/English keyboards |
 | **Private Messages** | Per-message delivery tracking with automatic retries |
 | **Channels** | Group messaging with receipt confirmation |
-| **Telegram Bridge** | Channels to group topics, PMs to private bot chat, bidirectional |
+| **Telegram Bridge** | Channels forwarded to group topics, PMs to private bot chat, bidirectional messaging |
 | **Web Dashboard** | Browser-based monitoring and messaging over WiFi |
-| **OTA Updates** | Over-the-air firmware updates from GitHub Releases |
-| **Contacts & Repeaters** | Full contact management with signal routing |
-| **WiFi + NTP** | Time sync and connectivity for bridge features |
-
----
-
-## Hardware
-
-| Component | Specification |
-|-----------|--------------|
-| **Board** | Elecrow CrowPanel 7.0" (DIS02050A / DIS05020A) |
-| **MCU** | ESP32-S3 (8MB Flash, PSRAM) |
-| **Display** | 7" 800x480 IPS, capacitive touch (GT911) |
-| **Radio** | SX1262 LoRa transceiver |
-| **Connectivity** | WiFi + Bluetooth (built-in) |
+| **Contacts & Repeaters** | Full contact and repeater management with signal routing |
+| **WiFi + NTP** | Time sync and connectivity for all bridge features |
 
 ---
 
@@ -79,10 +93,10 @@ CrowPanel-DIS02050A/
 ```bash
 git clone https://github.com/kgiannadakis/CrowPanel-DIS02050A.git
 cd CrowPanel-DIS02050A
-python flash_all.py COM20              # Windows
-python flash_all.py /dev/ttyUSB0       # Linux
-python flash_all.py /dev/cu.usbserial  # macOS
+python flash_all.py <PORT>
 ```
+
+Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).
 
 This builds all three firmwares and flashes them to the correct partition addresses. Use `--skip-build` to flash without rebuilding.
 
@@ -93,30 +107,6 @@ pio run -d selector  -e boot_selector
 pio run -d meshcore  -e crowpanel_v11_lvgl_chat
 pio run -d meshtastic -e crowpanel-dis05020a-v11
 ```
-
----
-
-## Partition Layout
-
-| Partition | Address | Size | Contents |
-|-----------|---------|------|----------|
-| `nvs` | 0x9000 | 20 KB | Settings & preferences |
-| `factory` | 0x10000 | 1 MB | Boot selector |
-| `ota_0` | 0x110000 | 5.4 MB | MeshCore |
-| `ota_1` | 0x680000 | 5.4 MB | Meshtastic |
-| `spiffs` | 0xBF0000 | 4 MB | Chat logs & data |
-
----
-
-## OTA Updates
-
-MeshCore supports over-the-air firmware updates:
-
-1. Connect to WiFi on the CrowPanel (**Web Apps** screen)
-2. In the OTA section, enter: `kgiannadakis/CrowPanel-DIS02050A`
-3. Tap **Check for Update**
-
-The device downloads and flashes the latest release automatically.
 
 ---
 

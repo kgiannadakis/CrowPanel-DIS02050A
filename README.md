@@ -79,40 +79,34 @@ This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh comm
 >
 > After flashing, use the **Floor Noise** function in the settings to tune and verify your noise level. A lower floor noise means better receive sensitivity and longer range.
 
-### Build & Flash (one command)
+### Build
 
-Clone the repo and use `flash_all.py` to build all three firmwares and flash them automatically:
+Clone the repo and build each firmware individually:
 
 ```bash
 git clone https://github.com/kgiannadakis/CrowPanel-DIS02050A.git
 cd CrowPanel-DIS02050A
-python flash_all.py <PORT>
+pio run -d selector  -e boot_selector
+pio run -d meshcore  -e crowpanel_v11_lvgl_chat
+pio run -d meshtastic -e crowpanel-dis05020a-v11
+```
+
+### Flash
+
+After building, flash all binaries to the correct addresses using esptool.
+
+> **Important:** Use the `partitions.bin` from the repo root (not any build output). Use the `bootloader.bin` from the Meshtastic build.
+
+```bash
+python -m esptool --chip esp32s3 --port <PORT> --baud 921600 write_flash \
+  0x0000   meshtastic/.pio/build/crowpanel-dis05020a-v11/bootloader.bin \
+  0x8000   partitions.bin \
+  0x10000  selector/.pio/build/boot_selector/firmware.bin \
+  0x110000 meshcore/.pio/build/crowpanel_v11_lvgl_chat/firmware.bin \
+  0x660000 meshtastic/.pio/build/crowpanel-dis05020a-v11/firmware*.bin
 ```
 
 Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).
-
-This builds the boot selector, MeshCore, and Meshtastic, then flashes all binaries to the correct partition addresses in one step.
-
-**Options:**
-- `--skip-build` — flash pre-built binaries without rebuilding
-- `--erase` — erase the entire flash before writing (useful for a clean start)
-
-### Manual Build & Flash
-
-If you prefer to build and flash manually:
-
-```bash
-pio run -d selector  -e boot_selector
-pio run -d meshcore  -e crowpanel_v11_lvgl_chat
-pio run -d meshtastic -e elecrow-adv1-43-50-70-tft
-
-python -m esptool --chip esp32s3 --port <PORT> --baud 921600 write_flash \
-  0x0000   selector/.pio/build/boot_selector/bootloader.bin \
-  0x8000   selector/.pio/build/boot_selector/partitions.bin \
-  0x10000  selector/.pio/build/boot_selector/firmware.bin \
-  0x110000 meshcore/.pio/build/crowpanel_v11_lvgl_chat/firmware.bin \
-  0x660000 meshtastic/.pio/build/elecrow-adv1-43-50-70-tft/firmware*.bin
-```
 
 ---
 

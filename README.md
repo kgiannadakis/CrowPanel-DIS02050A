@@ -165,7 +165,7 @@ This project is licensed under the **GNU General Public License v3.0** — see [
 
 ## Disclaimer
 
-I am not a professional programmer. This project is the result of a lot of hard work, manual patches, use of AI tools, and trial and error. Expect some functions not to be perfect — if you find issues, feel free to open an issue or submit a fix!
+I am not a professional programmer. This project is the result of a lot of hard work, manual patches, use of AI tools, and trial and error. Expect some functions not to be perfect. This is maintained in my free time, so updates may be infrequent.
 
 ---
 

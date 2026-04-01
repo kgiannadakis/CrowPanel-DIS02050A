@@ -81,7 +81,7 @@ This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh comm
 
 ### Build
 
-Clone the repo and build each firmware individually:
+Start VS Code and run the following commands in the terminal; clone the repo and build each firmware individually:
 
 ```bash
 git clone https://github.com/kgiannadakis/CrowPanel-DIS02050A.git

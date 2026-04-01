@@ -1,137 +1,159 @@
-# CrowPanel DIS02050A — Dual-Boot LoRa Mesh Firmware
+<p align="center">
+  <h1 align="center">CrowPanel DIS02050A<br>Dual-Boot LoRa Mesh Firmware</h1>
+  <p align="center">
+    Run <b>MeshCore</b> or <b>Meshtastic</b> on your CrowPanel — switch at boot, no reflashing.
+  </p>
+  <p align="center">
+    <img src="https://img.shields.io/badge/ESP32--S3-LoRa_Mesh-blue?style=flat-square" alt="ESP32-S3">
+    <img src="https://img.shields.io/badge/display-7%22_800x480-green?style=flat-square" alt="Display">
+    <img src="https://img.shields.io/badge/radio-SX1262-orange?style=flat-square" alt="SX1262">
+    <img src="https://img.shields.io/badge/license-GPL--3.0-red?style=flat-square" alt="License">
+    <img src="https://img.shields.io/github/v/release/kgiannadakis/CrowPanel-DIS02050A?style=flat-square&label=firmware" alt="Release">
+  </p>
+</p>
 
-A dual-boot system for the **Elecrow CrowPanel 7.0" (DIS02050A)** with ESP32-S3 and SX1262 LoRa radio. Choose between two mesh networking firmwares at boot — no reflashing needed.
+---
 
-## What Is This?
+## Overview
 
-This project turns the CrowPanel into a standalone LoRa mesh communicator with a full touchscreen UI. At startup, a boot selector lets you pick which firmware to run:
+This project turns the **Elecrow CrowPanel 7.0"** into a standalone LoRa mesh communicator with a full touchscreen UI. A boot selector lets you choose which firmware to run at startup — no cables, no reflashing.
 
-- **MeshCore** — Feature-rich mesh chat with LVGL touchscreen UI, Telegram bridge, web dashboard, and OTA updates
-- **Meshtastic** — The popular open-source LoRa mesh platform, ported to the CrowPanel's display
+| Firmware | Description |
+|----------|-------------|
+| **MeshCore** | Feature-rich mesh chat with dark-themed LVGL UI, Telegram bridge, web dashboard, and OTA updates |
+| **Meshtastic** | The popular open-source LoRa mesh platform, ported to the CrowPanel display |
+| **Boot Selector** | Touchscreen menu at startup to pick your firmware |
 
-Both firmwares share the same LoRa hardware and can communicate with other MeshCore or Meshtastic nodes in range.
+---
 
-## Features
+## MeshCore Features
 
-### MeshCore (v1.1.4)
-- Full touchscreen chat UI (LVGL 8.3, dark theme, portrait/landscape)
-- Private messages with per-message delivery tracking and retries
-- Channel (group) messaging with receipt confirmation
-- Contact and repeater management
-- Telegram bridge — channels forwarded to a Telegram group with forum topics, PMs to private bot chat
-- Web dashboard — browser-based monitoring and messaging over WiFi
-- OTA firmware updates from GitHub Releases
-- WiFi + NTP time sync
-- Greek and English keyboard layouts
+| Feature | Details |
+|---------|---------|
+| **Chat UI** | LVGL 8.3 dark theme, portrait & landscape, Greek/English keyboards |
+| **Private Messages** | Per-message delivery tracking with automatic retries |
+| **Channels** | Group messaging with receipt confirmation |
+| **Telegram Bridge** | Channels to group topics, PMs to private bot chat, bidirectional |
+| **Web Dashboard** | Browser-based monitoring and messaging over WiFi |
+| **OTA Updates** | Over-the-air firmware updates from GitHub Releases |
+| **Contacts & Repeaters** | Full contact management with signal routing |
+| **WiFi + NTP** | Time sync and connectivity for bridge features |
 
-### Meshtastic
-- Full Meshtastic protocol support
-- Adapted for the CrowPanel's 800x480 display with LovyanGFX driver
-- Compatible with all standard Meshtastic clients and nodes
-
-### Boot Selector
-- Runs from the factory partition
-- Simple touchscreen menu to choose MeshCore or Meshtastic
-- Remembers your last choice
-- No reflashing required to switch between firmwares
+---
 
 ## Hardware
 
-- **Board:** Elecrow CrowPanel 7.0" (DIS02050A / DIS05020A)
-- **MCU:** ESP32-S3 (8MB Flash, PSRAM)
-- **Display:** 7" 800x480 capacitive touch (GT911)
-- **Radio:** SX1262 LoRa transceiver
-- **Connectivity:** WiFi, Bluetooth (ESP32-S3 built-in)
+| Component | Specification |
+|-----------|--------------|
+| **Board** | Elecrow CrowPanel 7.0" (DIS02050A / DIS05020A) |
+| **MCU** | ESP32-S3 (8MB Flash, PSRAM) |
+| **Display** | 7" 800x480 IPS, capacitive touch (GT911) |
+| **Radio** | SX1262 LoRa transceiver |
+| **Connectivity** | WiFi + Bluetooth (built-in) |
+
+---
 
 ## Repository Structure
 
 ```
 CrowPanel-DIS02050A/
-├── meshcore/       — MeshCore firmware (PlatformIO project)
-├── meshtastic/     — Meshtastic firmware (PlatformIO project)
-├── selector/       — Boot selector firmware (PlatformIO project)
-├── flash_all.py    — Build & flash all three in one step
-└── LICENSE         — GPL-3.0
+├── meshcore/        MeshCore firmware (PlatformIO project)
+├── meshtastic/      Meshtastic firmware (PlatformIO project)
+├── selector/        Boot selector firmware (PlatformIO project)
+├── flash_all.py     Build & flash all three in one step
+└── LICENSE          GPL-3.0
 ```
 
-## Getting Started
+---
+
+## Quick Start
 
 ### Prerequisites
 
 - [PlatformIO](https://platformio.org/) (CLI or VS Code extension)
 - Python 3 (included with PlatformIO)
-- USB-C cable connected to the CrowPanel
+- USB-C cable
 
-### Build & Flash
-
-Flash all three firmwares in one command:
+### Flash Everything
 
 ```bash
-python flash_all.py COM20          # Windows
-python flash_all.py /dev/ttyUSB0   # Linux
-python flash_all.py /dev/cu.usbserial-*  # macOS
+git clone https://github.com/kgiannadakis/CrowPanel-DIS02050A.git
+cd CrowPanel-DIS02050A
+python flash_all.py COM20              # Windows
+python flash_all.py /dev/ttyUSB0       # Linux
+python flash_all.py /dev/cu.usbserial  # macOS
 ```
 
-This builds the boot selector, MeshCore, and Meshtastic, then flashes them to the correct partition addresses.
-
-To flash without rebuilding:
-
-```bash
-python flash_all.py COM20 --skip-build
-```
+This builds all three firmwares and flashes them to the correct partition addresses. Use `--skip-build` to flash without rebuilding.
 
 ### Build Individual Projects
 
 ```bash
-pio run -d selector -e boot_selector
-pio run -d meshcore -e crowpanel_v11_lvgl_chat
+pio run -d selector  -e boot_selector
+pio run -d meshcore  -e crowpanel_v11_lvgl_chat
 pio run -d meshtastic -e crowpanel-dis05020a-v11
 ```
 
+---
+
 ## Partition Layout
 
-| Partition | Address    | Size   | Contents          |
-|-----------|------------|--------|-------------------|
-| factory   | 0x10000    | 1 MB   | Boot selector     |
-| ota_0     | 0x110000   | 5.4 MB | MeshCore          |
-| ota_1     | 0x680000   | 5.4 MB | Meshtastic        |
-| spiffs    | 0xBF0000   | 4 MB   | Chat logs & data  |
-| nvs       | 0x9000     | 20 KB  | Settings          |
+| Partition | Address | Size | Contents |
+|-----------|---------|------|----------|
+| `nvs` | 0x9000 | 20 KB | Settings & preferences |
+| `factory` | 0x10000 | 1 MB | Boot selector |
+| `ota_0` | 0x110000 | 5.4 MB | MeshCore |
+| `ota_1` | 0x680000 | 5.4 MB | Meshtastic |
+| `spiffs` | 0xBF0000 | 4 MB | Chat logs & data |
 
-## OTA Updates (MeshCore)
+---
 
-MeshCore supports over-the-air firmware updates from GitHub Releases:
+## OTA Updates
 
-1. Connect to WiFi on the CrowPanel (Web Apps screen)
-2. In the OTA section, enter this repo: `YOUR_USERNAME/CrowPanel-DIS02050A`
+MeshCore supports over-the-air firmware updates:
+
+1. Connect to WiFi on the CrowPanel (**Web Apps** screen)
+2. In the OTA section, enter: `kgiannadakis/CrowPanel-DIS02050A`
 3. Tap **Check for Update**
 
-The device downloads and flashes the new firmware automatically.
+The device downloads and flashes the latest release automatically.
 
-## Telegram Bridge (MeshCore)
+---
 
-Bridge your mesh conversations to Telegram:
+## Telegram Bridge
 
-1. Create a bot via [@BotFather](https://t.me/BotFather) on Telegram
-2. Create a group, enable Topics, add the bot as admin with "Manage Topics" permission
-3. Enter the bot token and group chat ID on the CrowPanel (Web Apps screen)
-4. Send `/start` to the bot in a private message to receive PMs
+Bridge your mesh conversations to Telegram with organized threading:
 
-Channel messages go to the group (one topic per channel). PMs go to your private bot chat.
+**Setup:**
+1. Create a bot via [@BotFather](https://t.me/BotFather)
+2. Create a Telegram group with Topics enabled, add the bot as admin
+3. Enter bot token and group chat ID on the CrowPanel (**Web Apps** screen)
+4. Send `/start` to the bot in a private message to link PMs
 
-Send messages from Telegram to the mesh:
-- `/pm ContactName your message` — send a private message
-- `/ch ChannelName your message` — send to a channel
+**How it works:**
+- Each mesh **channel** gets its own topic thread in the Telegram group
+- **PMs** go to your private chat with the bot (only you can see them)
+- Send from Telegram: `/pm ContactName message` or `/ch ChannelName message`
+
+---
+
+## Acknowledgments
+
+- [Meshtastic](https://meshtastic.org/) — Open-source LoRa mesh networking
+- [MeshCore](https://github.com/rmendes76/MeshCore) — LoRa mesh chat framework
+- [Elecrow](https://www.elecrow.com/) — CrowPanel hardware
+- [LVGL](https://lvgl.io/) — Embedded graphics library
+
+---
 
 ## License
 
 This project is licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE).
 
-Meshtastic is developed by the [Meshtastic project](https://meshtastic.org/) under GPL-3.0.
-MeshCore is developed by the [MeshCore project](https://github.com/rmendes76/MeshCore).
+---
 
 ## Contributing
 
 Contributions are welcome! Feel free to open issues or pull requests.
 
-If you're adapting this for a different CrowPanel model, the key files to modify are the display driver (`LovyanGFX_Driver.h`), pin definitions, and partition table.
+If you're adapting this for a different CrowPanel model, the key files to modify are the display driver, pin definitions, and partition table.

@@ -79,34 +79,31 @@ This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh comm
 >
 > After flashing, use the **Floor Noise** function in the settings to tune and verify your noise level. A lower floor noise means better receive sensitivity and longer range.
 
-### Build
+### Build & Flash
 
-Clone the repo and build each firmware individually:
+Clone the repo and use `flash_all.py` to build all three firmwares and flash them:
 
 ```bash
 git clone https://github.com/kgiannadakis/CrowPanel-DIS02050A.git
 cd CrowPanel-DIS02050A
+python flash_all.py <PORT>
+```
+
+Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).
+
+Use `--skip-build` to flash pre-built binaries without rebuilding.
+
+The script automatically picks the correct `partitions.bin` from the repo root and the `bootloader.bin` from the Meshtastic build.
+
+### Build Individual Projects
+
+If you prefer to build manually:
+
+```bash
 pio run -d selector  -e boot_selector
 pio run -d meshcore  -e crowpanel_v11_lvgl_chat
 pio run -d meshtastic -e crowpanel-dis05020a-v11
 ```
-
-### Flash
-
-After building, flash all binaries to the correct addresses using esptool.
-
-> **Important:** Use the `partitions.bin` from the repo root (not any build output). Use the `bootloader.bin` from the Meshtastic build.
-
-```bash
-python -m esptool --chip esp32s3 --port <PORT> --baud 921600 write_flash \
-  0x0000   meshtastic/.pio/build/crowpanel-dis05020a-v11/bootloader.bin \
-  0x8000   partitions.bin \
-  0x10000  selector/.pio/build/boot_selector/firmware.bin \
-  0x110000 meshcore/.pio/build/crowpanel_v11_lvgl_chat/firmware.bin \
-  0x660000 meshtastic/.pio/build/crowpanel-dis05020a-v11/firmware*.bin
-```
-
-Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).
 
 ---
 
@@ -151,7 +148,8 @@ CrowPanel-DIS02050A/
 ├── meshcore/        MeshCore firmware (PlatformIO project)
 ├── meshtastic/      Meshtastic firmware (PlatformIO project)
 ├── selector/        Boot selector firmware (PlatformIO project)
-├── flash_all.py     Build & flash all three in one command
+├── partitions.bin   Dual-boot partition table (pre-built)
+├── flash_all.py     Build & flash script
 └── LICENSE          GPL-3.0
 ```
 

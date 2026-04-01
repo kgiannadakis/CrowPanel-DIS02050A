@@ -88,7 +88,7 @@ git clone https://github.com/kgiannadakis/CrowPanel-DIS02050A.git
 cd CrowPanel-DIS02050A
 pio run -d selector  -e boot_selector
 pio run -d meshcore  -e crowpanel_v11_lvgl_chat
-pio run -d meshtastic -e crowpanel-dis05020a-v11
+pio run -d meshtastic -e elecrow-adv1-43-50-70-tft
 ```
 
 ### Flash
@@ -101,7 +101,7 @@ python -m esptool --chip esp32s3 --port <PORT> --baud 921600 write_flash \
   0x8000   selector/.pio/build/boot_selector/partitions.bin \
   0x10000  selector/.pio/build/boot_selector/firmware.bin \
   0x110000 meshcore/.pio/build/crowpanel_v11_lvgl_chat/firmware.bin \
-  0x660000 meshtastic/.pio/build/crowpanel-dis05020a-v11/firmware*.bin
+  0x660000 meshtastic/.pio/build/elecrow-adv1-43-50-70-tft/firmware*.bin
 ```
 
 Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).

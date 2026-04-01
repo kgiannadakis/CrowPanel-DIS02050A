@@ -79,23 +79,33 @@ This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh comm
 >
 > After flashing, use the **Floor Noise** function in the settings to tune and verify your noise level. A lower floor noise means better receive sensitivity and longer range.
 
-### Build
+### Build & Flash (one command)
 
-Start VS Code and run the following commands in the terminal; clone the repo and build each firmware individually:
+Clone the repo and use `flash_all.py` to build all three firmwares and flash them automatically:
 
 ```bash
 git clone https://github.com/kgiannadakis/CrowPanel-DIS02050A.git
 cd CrowPanel-DIS02050A
+python flash_all.py <PORT>
+```
+
+Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).
+
+This builds the boot selector, MeshCore, and Meshtastic, then flashes all binaries to the correct partition addresses in one step.
+
+**Options:**
+- `--skip-build` — flash pre-built binaries without rebuilding
+- `--erase` — erase the entire flash before writing (useful for a clean start)
+
+### Manual Build & Flash
+
+If you prefer to build and flash manually:
+
+```bash
 pio run -d selector  -e boot_selector
 pio run -d meshcore  -e crowpanel_v11_lvgl_chat
 pio run -d meshtastic -e elecrow-adv1-43-50-70-tft
-```
 
-### Flash
-
-After building, flash all five binaries to the correct addresses using esptool:
-
-```bash
 python -m esptool --chip esp32s3 --port <PORT> --baud 921600 write_flash \
   0x0000   selector/.pio/build/boot_selector/bootloader.bin \
   0x8000   selector/.pio/build/boot_selector/partitions.bin \
@@ -103,8 +113,6 @@ python -m esptool --chip esp32s3 --port <PORT> --baud 921600 write_flash \
   0x110000 meshcore/.pio/build/crowpanel_v11_lvgl_chat/firmware.bin \
   0x660000 meshtastic/.pio/build/elecrow-adv1-43-50-70-tft/firmware*.bin
 ```
-
-Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).
 
 ---
 
@@ -149,6 +157,7 @@ CrowPanel-DIS02050A/
 ├── meshcore/        MeshCore firmware (PlatformIO project)
 ├── meshtastic/      Meshtastic firmware (PlatformIO project)
 ├── selector/        Boot selector firmware (PlatformIO project)
+├── flash_all.py     Build & flash all three in one command
 └── LICENSE          GPL-3.0
 ```
 

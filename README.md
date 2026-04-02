@@ -91,9 +91,9 @@ python flash_all.py <PORT>
 
 Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).
 
-Use `--skip-build` to flash pre-built binaries without rebuilding.
+The dual-boot system requires the specific `partitions.bin` included in the repo root. The bootloader is automatically picked from the Meshtastic build output.
 
-The script automatically picks the correct `partitions.bin` from the repo root and the `bootloader.bin` from the Meshtastic build.
+> **Note:** The build and flash process will take several minutes — be patient! The first boot after installation will also be longer than usual.
 
 ### Build Individual Projects
 

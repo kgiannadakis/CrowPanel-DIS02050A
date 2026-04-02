@@ -39,25 +39,13 @@
 
 ## Screenshots
 
-<p align="center">
-  <img src="docs/images/bootscreen.jpg" width="280" alt="Boot Selector">
-  &nbsp;
-  <img src="docs/images/chats.jpg" width="280" alt="Chat List">
-  &nbsp;
-  <img src="docs/images/chat.jpg" width="280" alt="Chat Conversation">
-</p>
-<p align="center">
-  <em>Boot selector — Chat list — Channel conversation with keyboard</em>
-</p>
+| Boot Selector | Chat List | Chat & Keyboard |
+|:---:|:---:|:---:|
+| <img src="docs/images/bootscreen.jpg" width="180"> | <img src="docs/images/chats.jpg" width="180"> | <img src="docs/images/chat.jpg" width="180"> |
 
-<p align="center">
-  <img src="docs/images/settings1.jpg" width="280" alt="Settings Top">
-  &nbsp;
-  <img src="docs/images/settings2.jpg" width="280" alt="Settings Bottom">
-</p>
-<p align="center">
-  <em>Settings — Serial monitor, radio presets, floor noise, device configuration</em>
-</p>
+| Settings (top) | Settings (bottom) |
+|:---:|:---:|
+| <img src="docs/images/settings1.jpg" width="180"> | <img src="docs/images/settings2.jpg" width="180"> |
 
 ---
 

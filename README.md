@@ -97,10 +97,9 @@ The script automatically picks the correct `partitions.bin` from the repo root a
 
 ### Build Individual Projects
 
-If you prefer to build manually:
+If you prefer to flash only one of the two firmwares, build them manually:
 
 ```bash
-pio run -d selector  -e boot_selector
 pio run -d meshcore  -e crowpanel_v11_lvgl_chat
 pio run -d meshtastic -e crowpanel-dis05020a-v11
 ```

@@ -34,7 +34,7 @@ REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 BUILDS = [
     ("selector",   "boot_selector"),
     ("meshcore",   "crowpanel_v11_lvgl_chat"),
-    ("meshtastic", "crowpanel-dis05020a-v11"),
+    ("meshtastic", "elecrow-adv1-43-50-70-tft"),
 ]
 
 
@@ -65,7 +65,7 @@ def flash():
         sys.exit(1)
 
     # Bootloader from Meshtastic build
-    mt_build = os.path.join(REPO_DIR, "meshtastic", ".pio", "build", "crowpanel-dis05020a-v11")
+    mt_build = os.path.join(REPO_DIR, "meshtastic", ".pio", "build", "elecrow-adv1-43-50-70-tft")
     bootloader = os.path.join(mt_build, "bootloader.bin")
     if not os.path.isfile(bootloader):
         print("ERROR: bootloader.bin not found in meshtastic build. Build meshtastic first.")
@@ -74,7 +74,7 @@ def flash():
     # Firmware binaries
     selector_fw  = find_firmware("selector",   "boot_selector")
     meshcore_fw  = find_firmware("meshcore",   "crowpanel_v11_lvgl_chat")
-    meshtastic_fw = find_firmware("meshtastic", "crowpanel-dis05020a-v11")
+    meshtastic_fw = find_firmware("meshtastic", "elecrow-adv1-43-50-70-tft")
 
     for name, fw in [("selector", selector_fw), ("meshcore", meshcore_fw), ("meshtastic", meshtastic_fw)]:
         if not fw:

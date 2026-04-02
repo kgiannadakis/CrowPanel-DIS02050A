@@ -101,7 +101,7 @@ If you prefer to flash only one of the two firmwares, build them manually:
 
 ```bash
 pio run -d meshcore  -e crowpanel_v11_lvgl_chat
-pio run -d meshtastic -e crowpanel-dis05020a-v11
+pio run -d meshtastic -e elecrow-adv1-43-50-70-tft
 ```
 
 ---

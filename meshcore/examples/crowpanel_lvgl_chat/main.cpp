@@ -640,7 +640,7 @@ protected:
     wake_on_event();
     if (pkt) snr_contact_update(contact.id.pub_key, pkt->_snr);
 
-    int hops = pkt ? (int)pkt->path_len : -1;
+    int hops = pkt ? (int)pkt->getPathHashCount() : -1;
 
     bool is_active = (g_in_chat_mode && _curr_kind == TargetKind::CONTACT && _curr_recipient &&
                       memcmp(_curr_recipient->id.pub_key, contact.id.pub_key, 32) == 0);
@@ -876,7 +876,7 @@ protected:
     String safeCh = sanitize_ascii_string(ch.name);
     String safeText = sanitize_ascii_string(text);
 
-    int hops = pkt ? (int)pkt->path_len : -1;
+    int hops = pkt ? (int)pkt->getPathHashCount() : -1;
     char logline[300];
     if (hops >= 0) snprintf(logline, sizeof(logline), "RX CH hops=%d %s: %s", hops, safeCh.c_str(), safeText.c_str());
     else           snprintf(logline, sizeof(logline), "RX CH hops=? %s: %s", safeCh.c_str(), safeText.c_str());

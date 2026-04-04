@@ -270,9 +270,10 @@ void chat_update_route_label() {
     if (g_path_discover_btn) lv_obj_add_flag(g_path_discover_btn, LV_OBJ_FLAG_HIDDEN);
   } else {
     char buf[16];
+    uint8_t true_hops = g_chat_route_path_len & 63;  // decode: lower 6 bits = hop count
     snprintf(buf, sizeof(buf), "%u hop%s",
-             (unsigned)g_chat_route_path_len,
-             g_chat_route_path_len == 1 ? "" : "s");
+             (unsigned)true_hops,
+             true_hops == 1 ? "" : "s");
     lv_label_set_text(g_chat_route_label, buf);
     lv_obj_set_style_text_color(g_chat_route_label, lv_color_hex(0x5EB5F7), 0);
     if (g_path_reset_btn) lv_obj_clear_flag(g_path_reset_btn, LV_OBJ_FLAG_HIDDEN);

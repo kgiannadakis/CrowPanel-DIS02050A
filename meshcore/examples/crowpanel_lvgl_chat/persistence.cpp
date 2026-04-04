@@ -315,6 +315,7 @@ void save_ui_prefs_nvs() {
   g_prefs.putUInt("timeout_s",    clamp_timeout_s(g_screen_timeout_s));
   g_prefs.putUChar("auto_contact",  g_auto_contact_enabled  ? 1 : 0);
   g_prefs.putUChar("auto_repeater", g_auto_repeater_enabled ? 1 : 0);
+  g_prefs.putUChar("pkt_fwd",      g_packet_forward_enabled ? 1 : 0);
   g_prefs.putUInt("muted_ch",     g_muted_channel_mask);
   g_prefs.putUChar("tz_idx",      (uint8_t)tz_get_index());
   g_prefs.putUChar("speaker_en",   g_speaker_enabled ? 1 : 0);
@@ -336,7 +337,8 @@ void load_ui_prefs_nvs() {
   g_prefs.begin("ui", true);
   g_screen_timeout_s      = clamp_timeout_s(g_prefs.getUInt("timeout_s", 30));
   g_auto_contact_enabled  = g_prefs.getUChar("auto_contact",  1) != 0;
-  g_auto_repeater_enabled = g_prefs.getUChar("auto_repeater", 1) != 0;
+  g_auto_repeater_enabled  = g_prefs.getUChar("auto_repeater", 1) != 0;
+  g_packet_forward_enabled = g_prefs.getUChar("pkt_fwd",      1) != 0;
   g_muted_channel_mask    = g_prefs.getUInt("muted_ch",       0);
   int tz_idx              = (int)g_prefs.getUChar("tz_idx", 10); // default Amsterdam
   g_speaker_enabled       = g_prefs.getUChar("speaker_en", 1) != 0;

@@ -522,6 +522,22 @@ void init_display_and_ui() {
       lv_obj_center(nl);
       lv_obj_add_event_cb(noise_btn, cb_floor_noise, LV_EVENT_CLICKED, nullptr);
 
+      // Packet Forward toggle button
+      g_pkt_fwd_btn = lv_btn_create(btn_parent);
+      lv_obj_set_size(g_pkt_fwd_btn, bw, bh);
+      lv_obj_set_style_radius(g_pkt_fwd_btn, 14, 0);
+      lv_obj_set_style_border_opa(g_pkt_fwd_btn, LV_OPA_TRANSP, 0);
+      lv_obj_set_style_shadow_opa(g_pkt_fwd_btn, LV_OPA_TRANSP, 0);
+      lv_obj_set_style_pad_all(g_pkt_fwd_btn, 4, 0);
+      lv_obj_t* fl = lv_label_create(g_pkt_fwd_btn);
+      lv_label_set_text(fl, LV_SYMBOL_SHUFFLE " Packet Forward");
+      lv_obj_set_style_text_font(fl, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_align(fl, LV_TEXT_ALIGN_CENTER, 0);
+      lv_obj_set_style_text_color(fl, lv_color_white(), 0);
+      lv_obj_center(fl);
+      lv_obj_add_event_cb(g_pkt_fwd_btn, cb_packet_forward_toggle, LV_EVENT_CLICKED, nullptr);
+      ui_apply_packet_forward_state();
+
       // Portrait: move disc_row after auto_row
       if (disc_row) {
         lv_obj_t* auto_row = lv_obj_get_parent(ui_autorepeatertoggle);

@@ -7,9 +7,7 @@
 #include "ui_theme.h"
 #include "ui_tabbar.h"
 
-#ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "1.1.4"
-#endif
+// FIRMWARE_VERSION is defined in platformio.ini build flags
 
 // ── Widget pointers ─────────────────────────────────────────
 

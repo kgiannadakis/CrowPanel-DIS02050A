@@ -27,6 +27,7 @@ const Preset* mesh_presets(int& count);
 void mesh_apply_preset_by_idx(int idx, bool do_advert = true);
 void mesh_send_flood_advert(int delay_ms = 0);
 void mesh_reset_current_contact_path();
+bool mesh_discover_contact_path();
 
 // Direct send without changing UI selection (for bridge/dashboard)
 bool mesh_send_text_to_contact(const uint8_t* pub_key, const char* text);

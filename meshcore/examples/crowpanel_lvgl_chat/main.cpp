@@ -31,6 +31,7 @@
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/IdentityStore.h>
 #include <helpers/BaseChatMesh.h>
+#include <helpers/TransportKeyStore.h>
 
 #include <RTClib.h>
 #include <target.h>
@@ -132,6 +133,7 @@ uint32_t          g_screen_timeout_s = 30;
 bool g_notifications_enabled = true;
 bool g_auto_contact_enabled  = true;
 bool g_auto_repeater_enabled = true;
+bool g_packet_forward_enabled = true;
 bool g_manual_discover_active = false;
 uint32_t g_discover_tag = 0;
 bool g_deferred_discover_done = false;
@@ -206,6 +208,7 @@ size_t g_serial_len = 0;
 // ---- Speaker / Discover buttons ----
 lv_obj_t* g_speaker_btn = nullptr;
 lv_obj_t* g_discover_repeaters_btn = nullptr;
+lv_obj_t* g_pkt_fwd_btn = nullptr;
 
 // ---- Keyboard state ----
 bool g_kb_greek = false;
@@ -283,6 +286,8 @@ class UIMesh : public BaseChatMesh, public ContactVisitor {
   ContactInfo* _curr_recipient;
   TargetKind _curr_kind;
   int _curr_channel_idx;
+  uint32_t _pending_discovery = 0;
+  TransportKey _send_scope;  // regional flood scope (all-zero = unrestricted)
 
 
   void loadPrefs() {
@@ -435,7 +440,51 @@ class UIMesh : public BaseChatMesh, public ContactVisitor {
 protected:
   float getAirtimeBudgetFactor() const override { return _prefs.airtime_factor; }
   int calcRxDelay(float, uint32_t) const override { return 0; }
-  bool allowPacketForward(const mesh::Packet*) override { return false; }
+  bool allowPacketForward(const mesh::Packet*) override { return g_packet_forward_enabled; }
+
+  void sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, uint32_t delay_millis = 0) override {
+    if (_send_scope.isNull()) {
+      sendFlood(pkt, delay_millis);
+    } else {
+      uint16_t codes[2];
+      codes[0] = _send_scope.calcTransportCode(pkt);
+      codes[1] = 0;
+      sendFlood(pkt, codes, delay_millis);
+    }
+  }
+  void sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis = 0) override {
+    if (_send_scope.isNull()) {
+      sendFlood(pkt, delay_millis);
+    } else {
+      uint16_t codes[2];
+      codes[0] = _send_scope.calcTransportCode(pkt);
+      codes[1] = 0;
+      sendFlood(pkt, codes, delay_millis);
+    }
+  }
+
+  bool onContactPathRecv(ContactInfo& contact, uint8_t* in_path, uint8_t in_path_len,
+                          uint8_t* out_path, uint8_t out_path_len,
+                          uint8_t extra_type, uint8_t* extra, uint8_t extra_len) override {
+    if (_pending_discovery && extra_type == PAYLOAD_TYPE_RESPONSE && extra_len > 4) {
+      uint32_t tag;
+      memcpy(&tag, extra, 4);
+      if (tag == _pending_discovery) {
+        _pending_discovery = 0;
+        if (mesh::Packet::isValidPathLen(in_path_len) && mesh::Packet::isValidPathLen(out_path_len)) {
+          char msg[128];
+          snprintf(msg, sizeof(msg), "PATH DISCOVERY: in=%u out=%u for %s",
+                   (unsigned)in_path_len, (unsigned)out_path_len, contact.name);
+          serialmon_append_color(0x00FF80, msg);
+        }
+        // Let the base class store the discovered path (unlike companion which defers to the app)
+        return BaseChatMesh::onContactPathRecv(contact, in_path, in_path_len,
+                                                out_path, out_path_len, extra_type, extra, extra_len);
+      }
+    }
+    return BaseChatMesh::onContactPathRecv(contact, in_path, in_path_len,
+                                            out_path, out_path_len, extra_type, extra, extra_len);
+  }
 
   void onControlDataRecv(mesh::Packet* packet) override {
     if (packet->payload_len < 6) return;
@@ -666,8 +715,11 @@ protected:
     return (uint32_t)(SEND_TIMEOUT_BASE_MILLIS + air * FLOOD_SEND_TIMEOUT_FACTOR);
   }
 
-  uint32_t calcDirectTimeoutMillisFor(uint32_t air, uint8_t) const override {
-    return (uint32_t)(SEND_TIMEOUT_BASE_MILLIS + air * FLOOD_SEND_TIMEOUT_FACTOR);
+  uint32_t calcDirectTimeoutMillisFor(uint32_t air, uint8_t path_len) const override {
+    uint8_t path_hash_count = path_len & 63;
+    return (uint32_t)(SEND_TIMEOUT_BASE_MILLIS +
+           (air * DIRECT_SEND_PERHOP_FACTOR + DIRECT_SEND_PERHOP_EXTRA_MILLIS) *
+           (path_hash_count + 1));
   }
 
   // --- Ring buffer helpers ---
@@ -745,11 +797,14 @@ protected:
     if (!slot) return;
 
     static const uint8_t MAX_PM_RETRIES = 3;
+    static const uint8_t FLOOD_FALLBACK_RETRY = 2;  // retries 0,1 = use stored path; 2,3 = force flood
     if (slot->retry_count < MAX_PM_RETRIES && slot->recipient && slot->retry_text[0]) {
       slot->retry_count++;
+      bool force_flood = (slot->retry_count >= FLOOD_FALLBACK_RETRY);
+      const char* via = force_flood ? "flood" : "stored path";
       char msg[96];
-      snprintf(msg, sizeof(msg), "TX timeout, retry %u/%u via flood (stored path=%u)",
-               slot->retry_count, MAX_PM_RETRIES, (unsigned)slot->recipient->out_path_len);
+      snprintf(msg, sizeof(msg), "TX timeout, retry %u/%u via %s (stored path=%u)",
+               slot->retry_count, MAX_PM_RETRIES, via, (unsigned)slot->recipient->out_path_len);
       serialmon_append(msg);
 
       // Update this slot's bubble with retry count
@@ -760,10 +815,15 @@ protected:
         lv_label_set_text(slot->status_label, stxt);
       }
 
-      ContactInfo flood_target = *(slot->recipient);
-      flood_target.out_path_len = OUT_PATH_UNKNOWN;
       uint32_t expected_ack = 0, est_timeout = 0;
-      int result = sendMessage(flood_target, slot->msg_ts, 0, slot->retry_text, expected_ack, est_timeout);
+      int result;
+      if (force_flood) {
+        ContactInfo flood_target = *(slot->recipient);
+        flood_target.out_path_len = OUT_PATH_UNKNOWN;
+        result = sendMessage(flood_target, slot->msg_ts, 0, slot->retry_text, expected_ack, est_timeout);
+      } else {
+        result = sendMessage(*(slot->recipient), slot->msg_ts, 0, slot->retry_text, expected_ack, est_timeout);
+      }
       if (result != MSG_SEND_FAILED) {
         if (slot->ack_count < MAX_PM_ACK_CODES)
           slot->ack_codes[slot->ack_count++] = expected_ack;
@@ -1163,6 +1223,28 @@ public:
   }
   void saveContactsNow() { saveContacts(); }
 
+  bool discoverContactPath() {
+    if (!_curr_recipient || _curr_kind != TargetKind::CONTACT) return false;
+    uint32_t tag, est_timeout;
+    // Path Discovery: temporarily force flood to send a telemetry request
+    uint8_t req_data[9];
+    req_data[0] = 0x03;  // REQ_TYPE_GET_TELEMETRY_DATA
+    req_data[1] = ~(0x01);  // inverse permissions: only request base telemetry
+    memset(&req_data[2], 0, 3);
+    getRNG()->random(&req_data[5], 4);  // random blob for unique packet hash
+    auto save = _curr_recipient->out_path_len;
+    _curr_recipient->out_path_len = OUT_PATH_UNKNOWN;  // force flood
+    int result = sendRequest(*_curr_recipient, req_data, sizeof(req_data), tag, est_timeout);
+    _curr_recipient->out_path_len = save;  // restore
+    if (result == MSG_SEND_FAILED) return false;
+    _pending_discovery = tag;
+    char msg[96];
+    snprintf(msg, sizeof(msg), "PATH DISCOVERY: sent flood req tag=%08lX timeout=%lums",
+             (unsigned long)tag, (unsigned long)est_timeout);
+    serialmon_append_color(0x00FF80, msg);
+    return true;
+  }
+
   // Send to a specific contact without changing UI selection (for bridge/dashboard)
   bool sendTextToContactByPubKey(const uint8_t* pk, const char* text) {
     ContactInfo* c = lookupContactByPubKey(pk, 32);
@@ -1438,19 +1520,17 @@ public:
         }
       }
 
-      ContactInfo flood_target = *_curr_recipient;
-      flood_target.out_path_len = OUT_PATH_UNKNOWN;
-
       uint32_t expected_ack = 0, est_timeout = 0;
-      int result = sendMessage(flood_target, ts, 0, safeText.c_str(), expected_ack, est_timeout);
+      int result = sendMessage(*_curr_recipient, ts, 0, safeText.c_str(), expected_ack, est_timeout);
 
       char namebuf[40];
       StrHelper::strncpy(namebuf, _curr_recipient->name, sizeof(namebuf));
       sanitize_ascii_inplace(namebuf);
 
+      const char* mode_str = (result == MSG_SEND_SENT_FLOOD) ? "FLOOD" : "DIRECT";
       char line[240];
-      snprintf(line, sizeof(line), "TX FLOOD PM to %s: %s ack=%08lX timeout=%lums result=%d",
-               namebuf, safeText.c_str(),
+      snprintf(line, sizeof(line), "TX %s PM to %s: %s ack=%08lX timeout=%lums result=%d",
+               mode_str, namebuf, safeText.c_str(),
                (unsigned long)expected_ack, (unsigned long)est_timeout, result);
       serialmon_append(line);
 
@@ -2183,6 +2263,10 @@ void mesh_reset_current_contact_path() {
   g_contacts_save_dirty = true;
   g_contacts_save_ms = millis();
   serialmon_append("Path reset to flood");
+}
+
+bool mesh_discover_contact_path() {
+  return g_uimesh ? g_uimesh->discoverContactPath() : false;
 }
 
 bool mesh_send_text_to_contact(const uint8_t* pub_key, const char* text) {

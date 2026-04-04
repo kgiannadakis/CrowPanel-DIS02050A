@@ -107,6 +107,19 @@ void cb_auto_repeater_toggle(lv_event_t*) {
   save_ui_prefs_nvs();
 }
 
+// ---- Packet forward toggle ----
+void ui_apply_packet_forward_state() {
+  if (g_pkt_fwd_btn)
+    lv_obj_set_style_bg_color(g_pkt_fwd_btn,
+      g_packet_forward_enabled ? lv_color_hex(g_theme->btn_active) : lv_color_hex(g_theme->btn_danger), 0);
+}
+void cb_packet_forward_toggle(lv_event_t*) {
+  g_packet_forward_enabled = !g_packet_forward_enabled;
+  ui_apply_packet_forward_state();
+  serialmon_append(g_packet_forward_enabled ? "Packet forwarding: ON" : "Packet forwarding: OFF");
+  save_ui_prefs_nvs();
+}
+
 // ---- Speaker toggle ----
 void ui_apply_speaker_btn_state() {
   if (!g_speaker_btn) return;

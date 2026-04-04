@@ -11,6 +11,7 @@
 #include "ui_homescreen.h"
 
 static lv_obj_t* g_path_reset_btn = nullptr;
+static lv_obj_t* g_path_discover_btn = nullptr;
 
 // ---- Chat rendering ----
 lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, const char* signal_info, uint16_t loaded_repeat_count) {
@@ -254,16 +255,19 @@ void chat_update_route_label() {
   if (!g_chat_route_is_contact) {
     lv_label_set_text(g_chat_route_label, "");
     if (g_path_reset_btn) lv_obj_add_flag(g_path_reset_btn, LV_OBJ_FLAG_HIDDEN);
+    if (g_path_discover_btn) lv_obj_add_flag(g_path_discover_btn, LV_OBJ_FLAG_HIDDEN);
     return;
   }
   if (g_chat_route_path_len == OUT_PATH_UNKNOWN) {
     lv_label_set_text(g_chat_route_label, "flood");
     lv_obj_set_style_text_color(g_chat_route_label, lv_color_hex(0xFFA040), 0);
     if (g_path_reset_btn) lv_obj_add_flag(g_path_reset_btn, LV_OBJ_FLAG_HIDDEN);
+    if (g_path_discover_btn) lv_obj_clear_flag(g_path_discover_btn, LV_OBJ_FLAG_HIDDEN);
   } else if (g_chat_route_path_len == 0) {
     lv_label_set_text(g_chat_route_label, "direct");
     lv_obj_set_style_text_color(g_chat_route_label, lv_color_hex(0x6DC264), 0);
     if (g_path_reset_btn) lv_obj_clear_flag(g_path_reset_btn, LV_OBJ_FLAG_HIDDEN);
+    if (g_path_discover_btn) lv_obj_add_flag(g_path_discover_btn, LV_OBJ_FLAG_HIDDEN);
   } else {
     char buf[16];
     snprintf(buf, sizeof(buf), "%u hop%s",
@@ -272,6 +276,7 @@ void chat_update_route_label() {
     lv_label_set_text(g_chat_route_label, buf);
     lv_obj_set_style_text_color(g_chat_route_label, lv_color_hex(0x5EB5F7), 0);
     if (g_path_reset_btn) lv_obj_clear_flag(g_path_reset_btn, LV_OBJ_FLAG_HIDDEN);
+    if (g_path_discover_btn) lv_obj_add_flag(g_path_discover_btn, LV_OBJ_FLAG_HIDDEN);
   }
 }
 
@@ -288,6 +293,7 @@ void chat_set_header(const char* name) {
     g_chat_header_label = nullptr;
     g_chat_route_label  = nullptr;
     g_path_reset_btn    = nullptr;
+    g_path_discover_btn = nullptr;
   }
 
   if (!g_chat_target_name[0]) return;
@@ -339,6 +345,25 @@ void chat_set_header(const char* name) {
     mesh_reset_current_contact_path();
   }, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_flag(g_path_reset_btn, LV_OBJ_FLAG_HIDDEN);  // hidden by default
+
+  // "Discover path" button — shown for PM contacts when in flood mode
+  g_path_discover_btn = lv_btn_create(g_chat_header_label);
+  lv_obj_set_size(g_path_discover_btn, LV_SIZE_CONTENT, 22);
+  lv_obj_set_style_pad_hor(g_path_discover_btn, 8, 0);
+  lv_obj_set_style_pad_ver(g_path_discover_btn, 2, 0);
+  lv_obj_set_style_bg_color(g_path_discover_btn, lv_color_hex(0x2B3B4D), 0);
+  lv_obj_set_style_bg_opa(g_path_discover_btn, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(g_path_discover_btn, 4, 0);
+  lv_obj_align(g_path_discover_btn, LV_ALIGN_RIGHT_MID, -6, 6);
+  lv_obj_t* dlbl = lv_label_create(g_path_discover_btn);
+  lv_label_set_text(dlbl, LV_SYMBOL_GPS " discover");
+  lv_obj_set_style_text_font(dlbl, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(dlbl, lv_color_hex(0x5EB5F7), 0);
+  lv_obj_center(dlbl);
+  lv_obj_add_event_cb(g_path_discover_btn, [](lv_event_t*) {
+    mesh_discover_contact_path();
+  }, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_flag(g_path_discover_btn, LV_OBJ_FLAG_HIDDEN);  // hidden by default
 
   chat_update_route_label();
 

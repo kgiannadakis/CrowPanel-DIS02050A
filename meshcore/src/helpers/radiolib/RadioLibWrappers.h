@@ -16,6 +16,7 @@ protected:
   void startRecv();
   float packetScoreInt(float snr, int sf, int packet_len);
   virtual bool isReceivingPacket() =0;
+  virtual void doResetAGC();
 
 public:
   RadioLibWrapper(PhysicalLayer& radio, mesh::MainBoard& board) : _radio(&radio), _board(&board) { n_recv = n_sent = 0; }
@@ -30,15 +31,11 @@ public:
   bool isInRecvMode() const override;
   bool isChannelActive();
 
-bool isReceiving() override {
-#if defined(RADIOLIBWRAP_FORCE_POLLING)
-  // CrowPanel: DIO IRQ isn't usable, so we must poll RX continuously.
-  return true;
-#else
-  if (isReceivingPacket()) return true;
-  return isChannelActive();
-#endif
-}
+  bool isReceiving() override { 
+    if (isReceivingPacket()) return true;
+
+    return isChannelActive();
+  }
 
   virtual float getCurrentRSSI() =0;
 
@@ -57,6 +54,9 @@ bool isReceiving() override {
   virtual float getLastSNR() const override;
 
   float packetScore(float snr, int packet_len) override { return packetScoreInt(snr, 10, packet_len); }  // assume sf=10
+
+  virtual void setRxBoostedGainMode(bool) { }
+  virtual bool getRxBoostedGainMode() const { return false; }
 };
 
 /**

@@ -3,7 +3,7 @@
 // app_globals.h — Shared declarations for the split modules
 // ============================================================
 
-#define FIRMWARE_VERSION "1.1.4"
+// FIRMWARE_VERSION is defined in platformio.ini build flags
 #define SERIALMON_VERBOSE 0
 
 #include <Arduino.h>
@@ -107,6 +107,8 @@ static const uint8_t REQ_TYPE_GET_PKT_RECEIPT = 0x08;
 
 #define SEND_TIMEOUT_BASE_MILLIS          4000
 #define FLOOD_SEND_TIMEOUT_FACTOR         20.0f
+#define DIRECT_SEND_PERHOP_FACTOR         6.0f
+#define DIRECT_SEND_PERHOP_EXTRA_MILLIS   250
 #define TEXTSEND_MAX_CHARS                150
 #define PUBLIC_GROUP_PSK  "izOH6cXN6mrJ5e26oRXNcg=="
 
@@ -183,6 +185,7 @@ extern uint32_t          g_screen_timeout_s;
 extern bool g_notifications_enabled;
 extern bool g_auto_contact_enabled;
 extern bool g_auto_repeater_enabled;
+extern bool g_packet_forward_enabled;
 extern bool g_manual_discover_active;
 extern uint32_t g_discover_tag;
 extern bool g_deferred_discover_done;
@@ -276,6 +279,7 @@ extern size_t g_serial_len;
 // Speaker btn
 extern lv_obj_t* g_speaker_btn;
 extern lv_obj_t* g_discover_repeaters_btn;
+extern lv_obj_t* g_pkt_fwd_btn;
 
 // Keyboard
 extern bool g_kb_greek;

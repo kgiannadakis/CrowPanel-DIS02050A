@@ -76,7 +76,7 @@ bool radio_init() {
   loraRadio.setCRC(true);
 
   // Route IRQs to DIO1 early
-  loraRadio.setDioIrqParamsPublic(
+  loraRadio.setDioIrqParams(
     RADIOLIB_SX126X_IRQ_ALL,
     RADIOLIB_SX126X_IRQ_ALL,
     RADIOLIB_SX126X_IRQ_NONE,
@@ -99,7 +99,7 @@ void radio_set_params(float freq_mhz, float bw_khz, uint8_t sf, uint8_t cr) {
   loraRadio.setCRC(true);
 
   // Keep IRQ routing consistent
-  loraRadio.setDioIrqParamsPublic(
+  loraRadio.setDioIrqParams(
     RADIOLIB_SX126X_IRQ_ALL,
     RADIOLIB_SX126X_IRQ_ALL,
     RADIOLIB_SX126X_IRQ_NONE,

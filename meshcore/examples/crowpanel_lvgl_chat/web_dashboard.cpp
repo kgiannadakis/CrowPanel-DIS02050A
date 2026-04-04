@@ -569,7 +569,7 @@ static void handle_repeaters(AsyncWebServerRequest* req) {
         snprintf(entry, sizeof(entry),
             "{\"name\":\"%.30s\",\"pubkey\":\"%.8s\",\"hops\":%d}",
             g_repeater_list[i]->name, pubhex,
-            (int)g_repeater_list[i]->out_path_len);
+            g_repeater_list[i]->out_path_len == 0xFF ? 255 : (int)(g_repeater_list[i]->out_path_len & 63));
         json += entry;
         count++;
     }

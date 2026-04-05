@@ -678,17 +678,18 @@ protected:
     else           snprintf(logline, sizeof(logline), "RX %s hops=? %s: %s", route, safeName.c_str(), safeText.c_str());
     serialmon_append(logline);
 
+    String sig = packet_signal_str(pkt);
+
     char bubble[512];
     snprintf(bubble, sizeof(bubble), "[%s] %s: %s",
              time_string_now().c_str(), safeName.c_str(), safeText.c_str());
-    append_chat_to_file(key_for_contact(contact.id), false, bubble);
+    append_chat_to_file(key_for_contact(contact.id), false, bubble, 0, sig.c_str());
 
     // Forward to bridges (incoming PM: sender=contact, recipient=me)
     tgbridge_forward_pm(safeName.c_str(), _prefs.node_name, safeText.c_str(), false);
     webdash_broadcast_message(safeName.c_str(), safeText.c_str(), false);
 
     if (is_active) {
-      String sig = packet_signal_str(pkt);
       deferred_msg_push(false, bubble, sig.c_str());
     } else {
       notify_contact_inc(contact.id.pub_key);
@@ -882,9 +883,11 @@ protected:
     else           snprintf(logline, sizeof(logline), "RX CH hops=? %s: %s", safeCh.c_str(), safeText.c_str());
     serialmon_append(logline);
 
+    String sig = packet_signal_str(pkt);
+
     char bubble[512];
     snprintf(bubble, sizeof(bubble), "[%s] %s", time_string_now().c_str(), safeText.c_str());
-    append_chat_to_file(key_for_channel(idx), false, bubble);
+    append_chat_to_file(key_for_channel(idx), false, bubble, 0, sig.c_str());
 
     // Split "SenderName: message" for Telegram bridge
     {
@@ -902,7 +905,6 @@ protected:
     bool is_active = (g_in_chat_mode && _curr_kind == TargetKind::CHANNEL && _curr_channel_idx == idx);
 
     if (is_active) {
-      String sig = packet_signal_str(pkt);
       deferred_msg_push(false, bubble, sig.c_str());
     } else if (!muted) {
       notify_channel_inc(idx);

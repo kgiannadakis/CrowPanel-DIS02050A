@@ -61,9 +61,29 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
   String safeTs = ts;
   safeTs.replace("#", "");
 
+  // Build signal info string for header (hops + SNR, shown next to sender)
+  String safeSig = "";
+  if (!out && signal_info && signal_info[0]) {
+    safeSig = sanitize_ascii_string(signal_info);
+    safeSig.replace("#", "");
+  }
+
   if (safeTs.length() || safeName.length()) {
-    char header[200];
-    if (safeTs.length() && safeName.length()) {
+    char header[300];
+    if (safeTs.length() && safeName.length() && safeSig.length()) {
+      snprintf(header, sizeof(header), "#%06lX %s#  #%06lX %s#  #%06lX %s#",
+               (unsigned long)g_theme->bubble_ts, safeTs.c_str(),
+               (unsigned long)g_theme->bubble_name, safeName.c_str(),
+               (unsigned long)g_theme->signal_text, safeSig.c_str());
+    } else if (safeTs.length() && safeSig.length()) {
+      snprintf(header, sizeof(header), "#%06lX %s#  #%06lX %s#",
+               (unsigned long)g_theme->bubble_ts, safeTs.c_str(),
+               (unsigned long)g_theme->signal_text, safeSig.c_str());
+    } else if (safeName.length() && safeSig.length()) {
+      snprintf(header, sizeof(header), "#%06lX %s#  #%06lX %s#",
+               (unsigned long)g_theme->bubble_name, safeName.c_str(),
+               (unsigned long)g_theme->signal_text, safeSig.c_str());
+    } else if (safeTs.length() && safeName.length()) {
       snprintf(header, sizeof(header), "#%06lX %s#  #%06lX %s#",
                (unsigned long)g_theme->bubble_ts, safeTs.c_str(),
                (unsigned long)g_theme->bubble_name, safeName.c_str());
@@ -131,13 +151,7 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
     }
   }
 
-  if (!out && signal_info && signal_info[0]) {
-    lv_obj_t* lblSig = lv_label_create(bubble);
-    lv_label_set_text(lblSig, signal_info);
-    lv_obj_set_style_text_color(lblSig, lv_color_hex(g_theme->signal_text), 0);
-    lv_obj_set_style_text_font(lblSig, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_opa(lblSig, LV_OPA_80, 0);
-  }
+  // Signal info (hops + SNR) is now shown in the header next to sender name
 
   if (!g_loading_history) chat_scroll_to_newest();
   return lblStatus;

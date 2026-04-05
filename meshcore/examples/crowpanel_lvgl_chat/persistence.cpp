@@ -46,7 +46,7 @@ String key_for_contact(const mesh::Identity& id) {
 String key_for_channel(int idx) { return String("ch_") + String(idx); }
 String chat_path_for(const String& key) { return String("/chat_") + key; }
 
-void append_chat_to_file(const String& key, bool out, const char* msg, uint32_t msg_ts) {
+void append_chat_to_file(const String& key, bool out, const char* msg, uint32_t msg_ts, const char* signal_info) {
 #if defined(ESP32)
   if ((SPIFFS.totalBytes() - SPIFFS.usedBytes()) < 4096) {
     serialmon_append("SPIFFS full - chat write skipped");
@@ -62,14 +62,18 @@ void append_chat_to_file(const String& key, bool out, const char* msg, uint32_t 
     f.print(ts);
     f.print("|P|");
   } else {
+    String safe_signal = signal_info ? sanitize_ascii_string(signal_info) : "";
+    safe_signal.replace('|', ',');
     f.print("RX|");
     f.print(ts);
-    f.print("||");
+    f.print("|");
+    if (safe_signal.length()) f.print(safe_signal);
+    f.print("|");
   }
   f.println(msg);
   f.close();
 #else
-  (void)key; (void)out; (void)msg; (void)msg_ts;
+  (void)key; (void)out; (void)msg; (void)msg_ts; (void)signal_info;
 #endif
 }
 
@@ -268,19 +272,42 @@ void load_chat_from_file(const String& key) {
     int p3 = line.indexOf('|', p2 + 1);
     char status = 0;
     uint16_t repeat_count = 0;
+    String sig_info = "";
     String body;
-    if (p3 >= 0 && p3 > p2 + 1) {
-      String status_str = line.substring(p2 + 1, p3);
-      status = status_str[0];
-      // Parse repeat count from "R3", "R12", etc.
-      if (status == 'R' && status_str.length() > 1) {
-        repeat_count = (uint16_t)atoi(status_str.c_str() + 1);
-      }
+    if (p3 >= 0) {
+      String middle = line.substring(p2 + 1, p3);
       body = line.substring(p3 + 1);
+
+      if (out) {
+        if (middle.length()) {
+          status = middle[0];
+          // Parse repeat count from "R3", "R12", etc.
+          if (status == 'R' && middle.length() > 1) {
+            repeat_count = (uint16_t)atoi(middle.c_str() + 1);
+          }
+        }
+      } else {
+        // RX lines store signal info in the middle field.
+        sig_info = middle;
+
+        // Recover lines written with a literal '|' inside the signal text, e.g.
+        // RX|ts|2 hops | SNR:5|message
+        int extra_pipe = body.indexOf('|');
+        if (sig_info.indexOf("hop") >= 0 && extra_pipe > 0) {
+          String sig_tail = body.substring(0, extra_pipe);
+          if (sig_tail.indexOf("SNR:") >= 0) {
+            sig_info.trim();
+            sig_tail.trim();
+            sig_info += ", ";
+            sig_info += sig_tail;
+            body = body.substring(extra_pipe + 1);
+          }
+        }
+      }
     } else {
       body = line.substring(p2 + 1);
     }
-    chat_add(out, body.c_str(), false, status, nullptr, repeat_count);
+    chat_add(out, body.c_str(), false, status, sig_info.length() ? sig_info.c_str() : nullptr, repeat_count);
   }
   g_loading_history = false;
   f.close();

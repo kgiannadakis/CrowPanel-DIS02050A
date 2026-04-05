@@ -277,8 +277,10 @@ String b64_encode_bytes(const uint8_t* data, size_t len) {
 
 String packet_signal_str(const mesh::Packet* pkt) {
   if (!pkt) return "";
-  char buf[16];
-  snprintf(buf, sizeof(buf), "SNR:%d", (int)pkt->_snr);
+  char buf[32];
+  int hops = (int)pkt->getPathHashCount();
+  snprintf(buf, sizeof(buf), "%d hop%s, SNR:%d",
+           hops, hops == 1 ? "" : "s", (int)pkt->_snr);
   return String(buf);
 }
 

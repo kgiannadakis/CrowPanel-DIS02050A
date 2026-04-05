@@ -48,6 +48,7 @@ struct NodePrefs {
   double node_lat, node_lon;
   float freq;
   int8_t tx_power_dbm;
+  uint8_t path_hash_mode;  // 0=1-byte, 1=2-byte, 2=3-byte path hashes
 };
 
 struct DeferredChatMsg { bool out; char txt[256]; char sig[32]; };
@@ -186,6 +187,8 @@ extern bool g_notifications_enabled;
 extern bool g_auto_contact_enabled;
 extern bool g_auto_repeater_enabled;
 extern bool g_packet_forward_enabled;
+extern bool g_auto_translate_enabled;
+extern int  g_translate_lang_idx;
 extern bool g_manual_discover_active;
 extern uint32_t g_discover_tag;
 extern bool g_deferred_discover_done;
@@ -315,6 +318,7 @@ struct OutboundPM {
   uint32_t expiry_ms;      // eviction time (0 while pending)
   ContactInfo* recipient;
   char     retry_text[241];
+  bool     resend_offered;   // true after resend button has been shown
 };
 extern OutboundPM g_pm_ring[PM_RING_SIZE];
 

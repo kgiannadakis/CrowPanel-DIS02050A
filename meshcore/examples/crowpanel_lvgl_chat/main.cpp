@@ -53,6 +53,7 @@
 #include "ota_update.h"
 #include "web_dashboard.h"
 #include "telegram_bridge.h"
+#include "translate.h"
 
 // ============================================================
 // Global variable DEFINITIONS
@@ -134,6 +135,8 @@ bool g_notifications_enabled = true;
 bool g_auto_contact_enabled  = true;
 bool g_auto_repeater_enabled = true;
 bool g_packet_forward_enabled = true;
+bool g_auto_translate_enabled = false;
+int  g_translate_lang_idx     = 0;
 bool g_manual_discover_active = false;
 uint32_t g_discover_tag = 0;
 bool g_deferred_discover_done = false;
@@ -231,7 +234,7 @@ OutboundPM g_pm_ring[PM_RING_SIZE] = {};
 const UITheme THEME_DARK = {
   0x0E1621,                                                  // screen bg
   0x2B5278, 0x182533, 0xF5F5F5, 0x8696A0, 0x5EB5F7,       // bubbles
-  0x6DC264, 0xE05555, 0xF5A623, 0xF5F5F5,                  // status + signal
+  0x6DC264, 0xE05555, 0xF5A623, 0x6DC264,                  // status + signal (green)
   0x17212B, 0xF5F5F5,                                        // chat header
   0x17212B, 0x2B3B4D, 0xF5F5F5, 0x3390EC,                   // hs contact
   0x17212B, 0x2B3B4D, 0xF5F5F5, 0x6DC264, 0x3390EC,        // hs channel
@@ -443,23 +446,25 @@ protected:
   bool allowPacketForward(const mesh::Packet*) override { return g_packet_forward_enabled; }
 
   void sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, uint32_t delay_millis = 0) override {
+    uint8_t phs = _prefs.path_hash_mode + 1;
     if (_send_scope.isNull()) {
-      sendFlood(pkt, delay_millis);
+      sendFlood(pkt, delay_millis, phs);
     } else {
       uint16_t codes[2];
       codes[0] = _send_scope.calcTransportCode(pkt);
       codes[1] = 0;
-      sendFlood(pkt, codes, delay_millis);
+      sendFlood(pkt, codes, delay_millis, phs);
     }
   }
   void sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis = 0) override {
+    uint8_t phs = _prefs.path_hash_mode + 1;
     if (_send_scope.isNull()) {
-      sendFlood(pkt, delay_millis);
+      sendFlood(pkt, delay_millis, phs);
     } else {
       uint16_t codes[2];
       codes[0] = _send_scope.calcTransportCode(pkt);
       codes[1] = 0;
-      sendFlood(pkt, codes, delay_millis);
+      sendFlood(pkt, codes, delay_millis, phs);
     }
   }
 
@@ -689,6 +694,12 @@ protected:
     tgbridge_forward_pm(safeName.c_str(), _prefs.node_name, safeText.c_str(), false);
     webdash_broadcast_message(safeName.c_str(), safeText.c_str(), false);
 
+    // Auto-translate incoming PM if enabled
+    if (g_auto_translate_enabled && g_wifi_connected) {
+      String ck = key_for_contact(contact.id);
+      translate_request_to_file(safeText.c_str(), ck.c_str(), nullptr);
+    }
+
     if (is_active) {
       deferred_msg_push(false, bubble, sig.c_str());
     } else {
@@ -821,9 +832,9 @@ protected:
       if (force_flood) {
         ContactInfo flood_target = *(slot->recipient);
         flood_target.out_path_len = OUT_PATH_UNKNOWN;
-        result = sendMessage(flood_target, slot->msg_ts, 0, slot->retry_text, expected_ack, est_timeout);
+        result = sendMessage(flood_target, slot->msg_ts, slot->retry_count, slot->retry_text, expected_ack, est_timeout);
       } else {
-        result = sendMessage(*(slot->recipient), slot->msg_ts, 0, slot->retry_text, expected_ack, est_timeout);
+        result = sendMessage(*(slot->recipient), slot->msg_ts, slot->retry_count, slot->retry_text, expected_ack, est_timeout);
       }
       if (result != MSG_SEND_FAILED) {
         if (slot->ack_count < MAX_PM_ACK_CODES)
@@ -901,6 +912,15 @@ protected:
       }
     }
     webdash_broadcast_message(safeCh.c_str(), safeText.c_str(), false);
+
+    // Auto-translate incoming channel message if enabled
+    // Extract just the message body (strip "SenderName: ")
+    if (g_auto_translate_enabled && g_wifi_connected) {
+      String ck = key_for_channel(idx);
+      int sep2 = safeText.indexOf(": ");
+      const char* body_to_translate = (sep2 > 0) ? safeText.c_str() + sep2 + 2 : safeText.c_str();
+      translate_request_to_file(body_to_translate, ck.c_str(), nullptr);
+    }
 
     bool is_active = (g_in_chat_mode && _curr_kind == TargetKind::CHANNEL && _curr_channel_idx == idx);
 
@@ -1252,10 +1272,8 @@ public:
     ContactInfo* c = lookupContactByPubKey(pk, 32);
     if (!c || !text || !text[0]) return false;
     uint32_t ts = rtc_clock.getCurrentTimeUnique();
-    ContactInfo flood_target = *c;
-    flood_target.out_path_len = OUT_PATH_UNKNOWN;
     uint32_t ack = 0, timeout = 0;
-    bool ok = sendMessage(flood_target, ts, 0, text, ack, timeout) != MSG_SEND_FAILED;
+    bool ok = sendMessage(*c, ts, 0, text, ack, timeout) != MSG_SEND_FAILED;
     if (ok) {
       String tsStr = time_string_now();
       String ck = key_for_contact(c->id);
@@ -1918,6 +1936,20 @@ void setup() {
 
   reg(ui_brightnessslider, cb_brightness, LV_EVENT_VALUE_CHANGED);
 
+  // Restore saved TX power from NVS
+  {
+    Preferences p;
+    p.begin("ui", true);
+    int8_t saved_tx = p.getChar("tx_power", 0);
+    p.end();
+    if (saved_tx >= 1 && saved_tx <= 22) {
+      radio_set_tx_power(saved_tx);
+      mesh_set_tx_power_pref(saved_tx);
+      char line[40];
+      snprintf(line, sizeof(line), "TX power restored: %d dBm", (int)saved_tx);
+      serialmon_append(line);
+    }
+  }
   if (ui_txpowerslider && g_uimesh) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%d", (int)g_uimesh->getTxPowerPref());
@@ -1938,6 +1970,16 @@ void setup() {
   reg(ui_autocontacttoggle,  cb_auto_contact_toggle);
   reg(ui_autorepeatertoggle, cb_auto_repeater_toggle);
 
+  // Translation
+  reg(ui_autotranslate_toggle, cb_auto_translate_toggle);
+  btn_lbl(ui_autotranslate_toggle, LV_SYMBOL_LOOP " Auto-Translate");
+  if (ui_translate_lang_dd) {
+    lv_dropdown_set_options(ui_translate_lang_dd, translate_lang_list());
+    lv_dropdown_set_selected(ui_translate_lang_dd, g_translate_lang_idx);
+    reg(ui_translate_lang_dd, cb_translate_lang_changed, LV_EVENT_VALUE_CHANGED);
+  }
+  ui_apply_auto_translate_state();
+
   // WiFi subsystem init (UI wiring is in features_cb.cpp)
   wifi_init();
 
@@ -1945,6 +1987,7 @@ void setup() {
   ota_init();
   webdash_init();
   tgbridge_init();
+  translate_init();
 
 
 #if ENABLE_ADVERT_ON_BOOT == 1
@@ -2013,9 +2056,10 @@ void loop() {
 
   // 1. Incoming chat messages
   if (g_deferred_msg_count > 0) {
-    for (int i = 0; i < g_deferred_msg_count; i++)
+    for (int i = 0; i < g_deferred_msg_count; i++) {
       chat_add(g_deferred_msgs[i].out, g_deferred_msgs[i].txt, false, 0,
                g_deferred_msgs[i].sig[0] ? g_deferred_msgs[i].sig : nullptr);
+    }
     g_deferred_msg_count = 0;
   }
   if (g_deferred_msg_dropped > 0) {
@@ -2107,6 +2151,11 @@ void loop() {
       update_tx_status_by_msg_ts(String(s.chat_key), s.msg_ts, s.state);
       s.file_dirty = false;
     }
+    // Show resend button on failed PMs (once)
+    if (s.state == 'N' && s.status_label && !s.resend_offered && s.recipient && s.retry_text[0]) {
+      chat_add_resend_btn(s.status_label, s.recipient->id.pub_key, s.retry_text);
+      s.resend_offered = true;
+    }
   }
 
   // 4b. Channel receipt status (uses g_deferred_status_char + g_pending_status_label)
@@ -2169,6 +2218,7 @@ void loop() {
   ota_loop();
   webdash_loop();
   tgbridge_loop();
+  translate_loop();
   poll_channel_receipt_if_due();
 
   if (g_del.kind != TargetKind::NONE &&
@@ -2211,10 +2261,8 @@ void loop() {
     g_login_timeout_ms = 0;
     if (!g_repeater_logged_in && g_selected_repeater && g_mesh && g_login_retry_count < 2) {
       g_login_retry_count++;
-      ContactInfo flood_target = *g_selected_repeater;
-      flood_target.out_path_len = OUT_PATH_UNKNOWN;
       uint32_t est_timeout;
-      int result = g_mesh->sendLogin(flood_target, g_login_last_pw, est_timeout);
+      int result = g_mesh->sendLogin(*g_selected_repeater, g_login_last_pw, est_timeout);
       if (result != MSG_SEND_FAILED) {
         memcpy(g_login_pending_key, g_selected_repeater->id.pub_key, 4);
         g_login_timeout_ms = millis() + max(est_timeout * 4, (uint32_t)20000);
@@ -2297,10 +2345,8 @@ int mesh_repeater_login(const uint8_t* pub_key, const char* password) {
   if (!g_uimesh) return -1;
   ContactInfo* c = g_uimesh->lookupContactByPubKey(pub_key, 32);
   if (!c) return -1;
-  ContactInfo flood_target = *c;
-  flood_target.out_path_len = OUT_PATH_UNKNOWN;
   uint32_t est_timeout;
-  int result = g_uimesh->sendLogin(flood_target, password, est_timeout);
+  int result = g_uimesh->sendLogin(*c, password, est_timeout);
   if (result == MSG_SEND_FAILED) return -1;
   g_selected_repeater = c;
   memcpy(g_login_pending_key, pub_key, 4);

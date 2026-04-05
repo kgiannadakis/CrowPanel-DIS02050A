@@ -6,6 +6,7 @@
 #include "utils.h"
 #include "app_globals.h"
 #include "mesh_api.h"
+#include "translate.h"
 
 #include "ui.h"
 #include "ui_homescreen.h"
@@ -13,8 +14,25 @@
 static lv_obj_t* g_path_reset_btn = nullptr;
 static lv_obj_t* g_path_discover_btn = nullptr;
 
+// ---- Long-press translate callback ----
+extern bool g_wifi_connected;
+
+static void cb_bubble_long_press_translate(lv_event_t* e) {
+    if (g_auto_translate_enabled) return;  // auto-translate handles it
+    if (!g_wifi_connected) return;
+    // user_data is the bubble container, target is the label that was touched
+    lv_obj_t* bubble = (lv_obj_t*)lv_event_get_user_data(e);
+    lv_obj_t* touched = lv_event_get_target(e);
+    if (!bubble || !touched) return;
+    // Read body text from the touched label (or find it in the bubble)
+    const char* body = lv_label_get_text(touched);
+    if (body && body[0]) {
+        translate_request(body, bubble);
+    }
+}
+
 // ---- Chat rendering ----
-lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, const char* signal_info, uint16_t loaded_repeat_count) {
+lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, const char* signal_info, uint16_t loaded_repeat_count, lv_obj_t** bubble_out, const char* translation) {
   if (!ui_chatpanel || !txt) return nullptr;
 
   String s = sanitize_ascii_string(txt);
@@ -153,6 +171,27 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
 
   // Signal info (hops + SNR) is now shown in the header next to sender name
 
+  // Long-press body label to translate incoming bubbles.
+  // Register on the label (it receives touch events), pass bubble as user_data.
+  if (!out && lbl) {
+    lv_obj_add_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(lbl, cb_bubble_long_press_translate, LV_EVENT_LONG_PRESSED, bubble);
+  }
+
+  // Show inline translation if provided (from file history or auto-translate)
+  if (translation && translation[0]) {
+    lv_obj_t* trans_lbl = lv_label_create(bubble);
+    lv_label_set_long_mode(trans_lbl, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(trans_lbl, translation);
+    lv_obj_set_width(trans_lbl, lv_pct(100));
+    lv_obj_set_style_text_color(trans_lbl, lv_color_hex(TH_TEXT3), 0);
+    lv_obj_set_style_text_font(trans_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_pad_top(trans_lbl, 4, 0);
+  }
+
+  // Expose the bubble to caller if requested
+  if (bubble_out) *bubble_out = bubble;
+
   if (!g_loading_history) chat_scroll_to_newest();
   return lblStatus;
 }
@@ -188,6 +227,73 @@ void apply_receipt_count_to_label(lv_obj_t* lbl, uint16_t count, int8_t snr_raw)
   }
   lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
   lv_obj_set_style_text_opa(lbl, LV_OPA_COVER, 0);
+}
+
+// ---- Resend button ----
+
+struct ResendData {
+  uint8_t pub_key[32];
+  char    text[241];
+  lv_obj_t* status_label;  // to update back to "sending..."
+};
+
+static void cb_resend_btn_delete(lv_event_t* e) {
+  // Free the ResendData when the button is deleted
+  ResendData* rd = (ResendData*)lv_event_get_user_data(e);
+  if (rd) lv_mem_free(rd);
+}
+
+static void cb_resend_pressed(lv_event_t* e) {
+  ResendData* rd = (ResendData*)lv_event_get_user_data(e);
+  if (!rd) return;
+
+  // Update status label
+  if (rd->status_label) {
+    lv_label_set_text(rd->status_label, LV_SYMBOL_REFRESH " resending...");
+    lv_obj_set_style_text_color(rd->status_label, lv_color_hex(g_theme->status_pending), 0);
+  }
+
+  // Send the message again
+  mesh_send_text_to_contact(rd->pub_key, rd->text);
+  serialmon_append("Resend triggered");
+
+  // Remove the resend button (this triggers cb_resend_btn_delete → frees rd)
+  lv_obj_t* btn = lv_event_get_target(e);
+  if (btn) lv_obj_del(btn);
+}
+
+void chat_add_resend_btn(lv_obj_t* status_label, const uint8_t* pub_key, const char* text) {
+  if (!status_label || !pub_key || !text || !text[0]) return;
+
+  lv_obj_t* bubble = lv_obj_get_parent(status_label);
+  if (!bubble) return;
+
+  // Allocate resend data
+  ResendData* rd = (ResendData*)lv_mem_alloc(sizeof(ResendData));
+  if (!rd) return;
+  memcpy(rd->pub_key, pub_key, 32);
+  strncpy(rd->text, text, sizeof(rd->text) - 1);
+  rd->text[sizeof(rd->text) - 1] = '\0';
+  rd->status_label = status_label;
+
+  // Create button inside the bubble
+  lv_obj_t* btn = lv_btn_create(bubble);
+  lv_obj_set_size(btn, LV_SIZE_CONTENT, 32);
+  lv_obj_set_style_radius(btn, 10, 0);
+  lv_obj_set_style_bg_color(btn, lv_color_hex(g_theme->btn_active), 0);
+  lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_left(btn, 12, 0);
+  lv_obj_set_style_pad_right(btn, 12, 0);
+  lv_obj_set_style_pad_top(btn, 4, 0);
+  lv_obj_set_style_pad_bottom(btn, 4, 0);
+
+  lv_obj_t* lbl = lv_label_create(btn);
+  lv_label_set_text(lbl, LV_SYMBOL_LOOP " Resend");
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+
+  lv_obj_add_event_cb(btn, cb_resend_pressed, LV_EVENT_CLICKED, rd);
+  lv_obj_add_event_cb(btn, cb_resend_btn_delete, LV_EVENT_DELETE, rd);
 }
 
 // ---- Chat scroll ----
@@ -401,5 +507,7 @@ void chat_clear() {
   g_channel_receipt.status_label = nullptr;
   // Invalidate all ring entry labels — LVGL objects are gone after lv_obj_clean
   for (int i = 0; i < PM_RING_SIZE; i++) g_pm_ring[i].status_label = nullptr;
+  // Invalidate pending translation bubble pointers
+  translate_invalidate_bubbles();
   scroll_btn_ensure();
 }

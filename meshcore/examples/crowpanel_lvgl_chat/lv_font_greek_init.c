@@ -23,6 +23,13 @@ extern lv_font_t lv_font_greek_18;
 extern lv_font_t lv_font_greek_20;
 extern lv_font_t lv_font_greek_22;
 
+
+// Emoji fonts (Noto Emoji monochrome)
+extern const lv_font_t lv_font_emoji_16;
+extern const lv_font_t lv_font_emoji_18;
+static lv_font_t s_emoji_16_writable;
+static lv_font_t s_emoji_18_writable;
+
 // Writable font copies — these become the "combined" fonts
 lv_font_t lv_font_mg_10;
 lv_font_t lv_font_mg_12;
@@ -52,8 +59,27 @@ void lv_font_greek_init(void) {
     setup_font(&lv_font_mg_10, &lv_font_greek_10, &lv_font_montserrat_10);
     setup_font(&lv_font_mg_12, &lv_font_greek_12, &lv_font_montserrat_12);
     setup_font(&lv_font_mg_14, &lv_font_greek_14, &lv_font_montserrat_14);
-    setup_font(&lv_font_mg_16, &lv_font_greek_16, &lv_font_montserrat_16);
-    setup_font(&lv_font_mg_18, &lv_font_greek_18, &lv_font_montserrat_18);
+    // Size 16: insert emoji into chain — Greek → Emoji → Montserrat
+    // 1. Make writable emoji copy with Montserrat as its fallback
+    memcpy(&s_emoji_16_writable, &lv_font_emoji_16, sizeof(lv_font_t));
+    s_emoji_16_writable.line_height          = lv_font_montserrat_16.line_height;
+    s_emoji_16_writable.base_line            = lv_font_montserrat_16.base_line;
+    s_emoji_16_writable.subpx                = lv_font_montserrat_16.subpx;
+    s_emoji_16_writable.underline_position   = lv_font_montserrat_16.underline_position;
+    s_emoji_16_writable.underline_thickness  = lv_font_montserrat_16.underline_thickness;
+    s_emoji_16_writable.fallback = (lv_font_t *)&lv_font_montserrat_16;
+    // 2. Set up Greek → Emoji (which falls back to Montserrat)
+    setup_font(&lv_font_mg_16, &lv_font_greek_16, &s_emoji_16_writable);
+
+    // Size 18: insert emoji into chain — Greek → Emoji → Montserrat
+    memcpy(&s_emoji_18_writable, &lv_font_emoji_18, sizeof(lv_font_t));
+    s_emoji_18_writable.line_height          = lv_font_montserrat_18.line_height;
+    s_emoji_18_writable.base_line            = lv_font_montserrat_18.base_line;
+    s_emoji_18_writable.subpx                = lv_font_montserrat_18.subpx;
+    s_emoji_18_writable.underline_position   = lv_font_montserrat_18.underline_position;
+    s_emoji_18_writable.underline_thickness  = lv_font_montserrat_18.underline_thickness;
+    s_emoji_18_writable.fallback = (lv_font_t *)&lv_font_montserrat_18;
+    setup_font(&lv_font_mg_18, &lv_font_greek_18, &s_emoji_18_writable);
     setup_font(&lv_font_mg_20, &lv_font_greek_20, &lv_font_montserrat_20);
     setup_font(&lv_font_mg_22, &lv_font_greek_22, &lv_font_montserrat_22);
 }

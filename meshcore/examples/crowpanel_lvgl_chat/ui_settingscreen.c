@@ -37,6 +37,7 @@ lv_obj_t * ui_txpowerslider       = NULL;
 lv_obj_t * ui_txpowerlabel        = NULL;
 lv_obj_t * ui_Keyboard2           = NULL;
 
+
 // Orientation toggle
 lv_obj_t * ui_orientationtoggle = NULL;
 lv_obj_t * ui_orientation_lbl   = NULL;
@@ -390,6 +391,7 @@ void ui_settingscreen_screen_init(void) {
     }
     // g_speaker_btn will be created by display.cpp inside the same row
 
+    // ══════════════════════════════════════════════════════════
     //══════════════════════════════════════════════════════════
     // DANGER ZONE
     // ══════════════════════════════════════════════════════════

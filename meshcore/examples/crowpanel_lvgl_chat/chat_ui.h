@@ -8,8 +8,9 @@
 #include "app_globals.h"
 
 // Chat bubble rendering
-lv_obj_t* chat_add(bool out, const char* txt, bool live = false, char loaded_status = 0, const char* signal_info = nullptr, uint16_t loaded_repeat_count = 0);
+lv_obj_t* chat_add(bool out, const char* txt, bool live = false, char loaded_status = 0, const char* signal_info = nullptr, uint16_t loaded_repeat_count = 0, lv_obj_t** bubble_out = nullptr, const char* translation = nullptr);
 void apply_status_to_label(lv_obj_t* lbl, char sc);
+void chat_add_resend_btn(lv_obj_t* status_label, const uint8_t* pub_key, const char* text);
 void apply_receipt_count_to_label(lv_obj_t* lbl, uint16_t count, int8_t snr_raw);
 
 // Chat scroll

@@ -21,6 +21,7 @@
 #include "ui_settingscreen.h"
 #include "features_ui.h"
 #include "features_cb.h"
+#include "translate.h"
 
 // ---- Event registration helper ----
 void reg(lv_obj_t* o, lv_event_cb_t cb, lv_event_code_t ev) {
@@ -59,11 +60,18 @@ void cb_txpower_ready(lv_event_t*) {
   int8_t dbm = (int8_t)val;
   radio_set_tx_power(dbm);
   mesh_set_tx_power_pref(dbm);
+  // Persist to NVS
+  {
+    Preferences p;
+    p.begin("ui", false);
+    p.putChar("tx_power", dbm);
+    p.end();
+  }
   char buf[8];
   snprintf(buf, sizeof(buf), "%d", (int)dbm);
   lv_textarea_set_text(ui_txpowerslider, buf);
   char line[32];
-  snprintf(line, sizeof(line), "TX power: %d dBm", (int)dbm);
+  snprintf(line, sizeof(line), "TX power: %d dBm (saved)", (int)dbm);
   serialmon_append(line);
   lv_obj_clear_state(ui_txpowerslider, LV_STATE_FOCUSED);
 }
@@ -117,6 +125,27 @@ void cb_packet_forward_toggle(lv_event_t*) {
   g_packet_forward_enabled = !g_packet_forward_enabled;
   ui_apply_packet_forward_state();
   serialmon_append(g_packet_forward_enabled ? "Packet forwarding: ON" : "Packet forwarding: OFF");
+  save_ui_prefs_nvs();
+}
+
+// ---- Auto-translate toggle ----
+void ui_apply_auto_translate_state() {
+  if (ui_autotranslate_toggle)
+    lv_obj_set_style_bg_color(ui_autotranslate_toggle,
+      g_auto_translate_enabled ? lv_color_hex(g_theme->btn_active) : lv_color_hex(g_theme->btn_danger), 0);
+}
+void cb_auto_translate_toggle(lv_event_t*) {
+  g_auto_translate_enabled = !g_auto_translate_enabled;
+  ui_apply_auto_translate_state();
+  serialmon_append(g_auto_translate_enabled ? "Auto-translate: ON" : "Auto-translate: OFF");
+  save_ui_prefs_nvs();
+}
+void cb_translate_lang_changed(lv_event_t*) {
+  if (!ui_translate_lang_dd) return;
+  g_translate_lang_idx = (int)lv_dropdown_get_selected(ui_translate_lang_dd);
+  char logbuf[48];
+  snprintf(logbuf, sizeof(logbuf), "Translate language: %s", translate_lang_code(g_translate_lang_idx));
+  serialmon_append(logbuf);
   save_ui_prefs_nvs();
 }
 

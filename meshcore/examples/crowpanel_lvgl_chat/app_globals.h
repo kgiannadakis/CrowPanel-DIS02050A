@@ -172,6 +172,7 @@ extern DeferredChatMsg g_deferred_msgs[];
 extern int g_deferred_msg_count;
 extern int g_deferred_msg_dropped;
 extern bool   g_deferred_swipe_back;
+extern bool   g_deferred_swipe_home;
 
 // Screen state
 extern volatile bool     g_screen_awake;
@@ -315,6 +316,7 @@ struct OutboundPM {
   lv_obj_t* status_label;  // LVGL label for this bubble (nullptr if off-screen)
   char     state;          // 'P'=pending, 'N'=failed, 'D'=delivered
   uint32_t hard_timeout_ms;
+  uint32_t retry_timeout_ms; // per-retry ACK timeout (0 = not waiting)
   uint32_t expiry_ms;      // eviction time (0 while pending)
   ContactInfo* recipient;
   char     retry_text[241];

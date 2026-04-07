@@ -91,3 +91,8 @@ void cb_wifi_password_focused(lv_event_t*);
 void cb_wifi_password_defocused(lv_event_t*);
 void ui_apply_wifi_state();
 void wifi_ui_update_status();
+
+// Translation
+void cb_auto_translate_toggle(lv_event_t*);
+void cb_translate_lang_changed(lv_event_t*);
+void ui_apply_auto_translate_state();

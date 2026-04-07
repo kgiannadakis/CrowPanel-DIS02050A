@@ -4,8 +4,13 @@
 
 #include "persistence.h"
 #include "utils.h"
+#include <vector>
+#if defined(ESP32)
+#include <esp_task_wdt.h>
+#endif
 #include "chat_ui.h"
 #include "settings_cb.h"
+#include "translate.h"
 
 #include "ui_homescreen.h"
 
@@ -74,6 +79,46 @@ void append_chat_to_file(const String& key, bool out, const char* msg, uint32_t 
   f.close();
 #else
   (void)key; (void)out; (void)msg; (void)msg_ts; (void)signal_info;
+#endif
+}
+
+void append_translation_to_last_rx(const String& key, const char* translation) {
+#if defined(ESP32)
+  if (!translation || !translation[0]) return;
+  String path = chat_path_for(key);
+  if (!SPIFFS.exists(path)) return;
+
+  // Read all lines, append translation to the last RX line
+  File f = SPIFFS.open(path, FILE_READ);
+  if (!f) return;
+
+  std::vector<String> lines;
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (line.length()) lines.push_back(line);
+  }
+  f.close();
+
+  // Find last RX line and append translation
+  for (int i = (int)lines.size() - 1; i >= 0; i--) {
+    if (lines[i].startsWith("RX|") && lines[i].indexOf("{{TR}}") < 0) {
+      lines[i] += "{{TR}}";
+      lines[i] += translation;
+      break;
+    }
+  }
+
+  // Rewrite file
+  esp_task_wdt_reset();
+  f = SPIFFS.open(path, FILE_WRITE);
+  if (!f) return;
+  for (size_t i = 0; i < lines.size(); i++) {
+    f.println(lines[i]);
+  }
+  f.close();
+#else
+  (void)key; (void)translation;
 #endif
 }
 
@@ -307,7 +352,16 @@ void load_chat_from_file(const String& key) {
     } else {
       body = line.substring(p2 + 1);
     }
-    chat_add(out, body.c_str(), false, status, sig_info.length() ? sig_info.c_str() : nullptr, repeat_count);
+
+    // Extract inline translation if present
+    String trans = "";
+    int tr_pos = body.indexOf("{{TR}}");
+    if (tr_pos >= 0) {
+      trans = body.substring(tr_pos + 6);
+      body = body.substring(0, tr_pos);
+    }
+
+    chat_add(out, body.c_str(), false, status, sig_info.length() ? sig_info.c_str() : nullptr, repeat_count, nullptr, trans.length() ? trans.c_str() : nullptr);
   }
   g_loading_history = false;
   f.close();
@@ -343,6 +397,8 @@ void save_ui_prefs_nvs() {
   g_prefs.putUChar("auto_contact",  g_auto_contact_enabled  ? 1 : 0);
   g_prefs.putUChar("auto_repeater", g_auto_repeater_enabled ? 1 : 0);
   g_prefs.putUChar("pkt_fwd",      g_packet_forward_enabled ? 1 : 0);
+  g_prefs.putUChar("auto_trans",   g_auto_translate_enabled ? 1 : 0);
+  g_prefs.putUChar("trans_lang",   (uint8_t)g_translate_lang_idx);
   g_prefs.putUInt("muted_ch",     g_muted_channel_mask);
   g_prefs.putUChar("tz_idx",      (uint8_t)tz_get_index());
   g_prefs.putUChar("speaker_en",   g_speaker_enabled ? 1 : 0);
@@ -366,6 +422,9 @@ void load_ui_prefs_nvs() {
   g_auto_contact_enabled  = g_prefs.getUChar("auto_contact",  1) != 0;
   g_auto_repeater_enabled  = g_prefs.getUChar("auto_repeater", 1) != 0;
   g_packet_forward_enabled = g_prefs.getUChar("pkt_fwd",      1) != 0;
+  g_auto_translate_enabled = g_prefs.getUChar("auto_trans",   0) != 0;
+  g_translate_lang_idx     = (int)g_prefs.getUChar("trans_lang", 0);
+  if (g_translate_lang_idx >= translate_lang_count()) g_translate_lang_idx = 0;
   g_muted_channel_mask    = g_prefs.getUInt("muted_ch",       0);
   int tz_idx              = (int)g_prefs.getUChar("tz_idx", 10); // default Amsterdam
   g_speaker_enabled       = g_prefs.getUChar("speaker_en", 1) != 0;

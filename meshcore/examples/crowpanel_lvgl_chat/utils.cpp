@@ -117,7 +117,7 @@ void sanitize_ascii_inplace(char* s) {
     if (c == '\n' || c == '\t') { *w++ = (char)c; r++; continue; }
     if (c >= 32 && c < 0x80) { *w++ = (char)c; r++; continue; }
     int slen = utf8_seq_len(c);
-    if (slen >= 2 && slen <= 3) {
+    if (slen >= 2 && slen <= 4) {
       bool ok = true;
       for (int i = 0; i < slen; i++) { if (!r[i]) { ok = false; break; } }
       if (ok && utf8_valid_seq(r, slen)) {
@@ -141,7 +141,7 @@ String sanitize_ascii_string(const char* s) {
     if (c == '\n' || c == '\t') { out += (char)c; r++; continue; }
     if (c >= 32 && c < 0x80) { out += (char)c; r++; continue; }
     int slen = utf8_seq_len(c);
-    if (slen >= 2 && slen <= 3) {
+    if (slen >= 2 && slen <= 4) {
       bool ok = true;
       for (int i = 0; i < slen; i++) { if (!r[i]) { ok = false; break; } }
       if (ok && utf8_valid_seq(r, slen)) {

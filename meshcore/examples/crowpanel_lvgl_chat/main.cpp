@@ -15,6 +15,8 @@
 #include "ui_settingscreen.h"
 #include "ui_repeaterscreen.h"
 
+extern "C" void _ui_screen_change(lv_obj_t** target, lv_scr_load_anim_t fademode, int spd, int delay, void (*target_init)(void));
+
 #include <Mesh.h>
 
 #if defined(NRF52_PLATFORM)
@@ -115,6 +117,7 @@ DeferredChatMsg g_deferred_msgs[DEFERRED_MSG_MAX];
 int g_deferred_msg_count = 0;
 int g_deferred_msg_dropped = 0;
 bool g_deferred_swipe_back = false;
+bool g_deferred_swipe_home = false;
 
 // ---- Features ----
 bool     g_tgbridge_enabled       = false;
@@ -775,6 +778,7 @@ protected:
     slot->ui_dirty = true;
     slot->file_dirty = true;
     slot->hard_timeout_ms = 0;
+    slot->retry_timeout_ms = 0;
     slot->expiry_ms = millis() + PM_LATE_EXPIRY_MS;
   }
 
@@ -784,6 +788,7 @@ protected:
     slot->ui_dirty = true;
     slot->file_dirty = true;
     slot->hard_timeout_ms = 0;
+    slot->retry_timeout_ms = 0;
     slot->expiry_ms = millis() + 5000; // keep briefly then evict
   }
 
@@ -804,12 +809,12 @@ protected:
     if (slot) pm_slot_mark_failed(slot);
   }
 
-  void onSendTimeout() override {
-    OutboundPM* slot = pm_find_pending();
-    if (!slot) return;
+  static const uint8_t MAX_PM_RETRIES = 3;
+  static const uint8_t FLOOD_FALLBACK_RETRY = 2;  // retries 0,1 = use stored path; 2,3 = force flood
 
-    static const uint8_t MAX_PM_RETRIES = 3;
-    static const uint8_t FLOOD_FALLBACK_RETRY = 2;  // retries 0,1 = use stored path; 2,3 = force flood
+  // Core retry logic — shared by onSendTimeout (first timeout from base class)
+  // and checkPmRetryTimeout (subsequent retries via our own timer).
+  void doPmRetry(OutboundPM* slot) {
     if (slot->retry_count < MAX_PM_RETRIES && slot->recipient && slot->retry_text[0]) {
       slot->retry_count++;
       bool force_flood = (slot->retry_count >= FLOOD_FALLBACK_RETRY);
@@ -819,7 +824,6 @@ protected:
                slot->retry_count, MAX_PM_RETRIES, via, (unsigned)slot->recipient->out_path_len);
       serialmon_append(msg);
 
-      // Update this slot's bubble with retry count
       if (slot->status_label) {
         char stxt[24];
         snprintf(stxt, sizeof(stxt), LV_SYMBOL_REFRESH " retry %u",
@@ -839,6 +843,10 @@ protected:
       if (result != MSG_SEND_FAILED) {
         if (slot->ack_count < MAX_PM_ACK_CODES)
           slot->ack_codes[slot->ack_count++] = expected_ack;
+        // Schedule next retry via our own timer. sendMessage() also sets
+        // txt_send_timeout in base class, but base class loop() clears it
+        // to 0 after onSendTimeout() returns on the first call.
+        slot->retry_timeout_ms = millis() + est_timeout;
         return;
       }
     }
@@ -865,6 +873,15 @@ protected:
       serialmon_append("PM FAILED: no recipient");
     }
     pm_slot_mark_failed(slot);
+  }
+
+  void onSendTimeout() override {
+    OutboundPM* slot = pm_find_pending();
+    if (!slot) return;
+    // If retry_timeout_ms is active, our own timer is managing retries —
+    // ignore this base class txt_send_timeout fire to prevent double-retry.
+    if (slot->retry_timeout_ms) return;
+    doPmRetry(slot);
   }
 
   void onChannelMessageRecv(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t ts, const char *text) override {
@@ -1321,6 +1338,16 @@ public:
       }
     }
     return ok;
+  }
+
+  void checkPmRetryTimeout() {
+    OutboundPM* slot = pm_find_pending();
+    if (!slot || !slot->retry_timeout_ms) return;
+    if ((int32_t)(millis() - slot->retry_timeout_ms) <= 0) return;
+    slot->retry_timeout_ms = 0;
+    // Don't call onSendTimeout() — that would go through sendMessage() which sets
+    // txt_send_timeout in the base class, causing double-fire. Do the retry directly.
+    doPmRetry(slot);
   }
 
   void checkPmHardTimeout() {
@@ -1970,15 +1997,7 @@ void setup() {
   reg(ui_autocontacttoggle,  cb_auto_contact_toggle);
   reg(ui_autorepeatertoggle, cb_auto_repeater_toggle);
 
-  // Translation
-  reg(ui_autotranslate_toggle, cb_auto_translate_toggle);
-  btn_lbl(ui_autotranslate_toggle, LV_SYMBOL_LOOP " Auto-Translate");
-  if (ui_translate_lang_dd) {
-    lv_dropdown_set_options(ui_translate_lang_dd, translate_lang_list());
-    lv_dropdown_set_selected(ui_translate_lang_dd, g_translate_lang_idx);
-    reg(ui_translate_lang_dd, cb_translate_lang_changed, LV_EVENT_VALUE_CHANGED);
-  }
-  ui_apply_auto_translate_state();
+  // Translation wiring is in features_cb.cpp (Web Apps screen)
 
   // WiFi subsystem init (UI wiring is in features_cb.cpp)
   wifi_init();
@@ -2190,11 +2209,27 @@ void loop() {
     chat_scroll_to_newest();
   }
 
-  // 8. Deferred swipe-right-to-go-back
+  // 8. Deferred swipe gestures
   if (g_deferred_swipe_back) {
     g_deferred_swipe_back = false;
     if (g_in_chat_mode) {
       exit_chat_mode();
+    } else {
+      // On any non-home screen, swipe left goes to home
+      lv_obj_t* act = lv_scr_act();
+      if (act != ui_homescreen) {
+        _ui_screen_change(&ui_homescreen, LV_SCR_LOAD_ANIM_NONE, 0, 0,
+                           ui_homescreen_screen_init);
+      }
+    }
+  }
+  if (g_deferred_swipe_home) {
+    g_deferred_swipe_home = false;
+    if (g_in_chat_mode) exit_chat_mode();
+    lv_obj_t* act = lv_scr_act();
+    if (act != ui_homescreen) {
+      _ui_screen_change(&ui_homescreen, LV_SCR_LOAD_ANIM_NONE, 0, 0,
+                         ui_homescreen_screen_init);
     }
   }
 
@@ -2206,6 +2241,7 @@ void loop() {
 
   if (g_mesh) g_mesh->loop();
 
+  if (g_uimesh) g_uimesh->checkPmRetryTimeout();
   if (g_uimesh) g_uimesh->checkPmHardTimeout();
 
   // Deferred radio actions

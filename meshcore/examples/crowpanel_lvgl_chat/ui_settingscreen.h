@@ -40,6 +40,7 @@ extern lv_obj_t * ui_txpowerslider;
 extern lv_obj_t * ui_txpowerlabel;
 extern lv_obj_t * ui_Keyboard2;
 
+// Translation
 // Orientation toggle
 extern lv_obj_t * ui_orientationtoggle;
 extern lv_obj_t * ui_orientation_lbl;

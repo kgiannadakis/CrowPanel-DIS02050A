@@ -11,6 +11,7 @@
 #include "telegram_bridge.h"
 #include "web_dashboard.h"
 #include "ota_update.h"
+#include "translate.h"
 #include "utils.h"
 
 static lv_coord_t s_form_orig_h = 0;
@@ -176,6 +177,16 @@ extern "C" void features_register_callbacks() {
     btn_lbl(ui_wifiscanbutton, LV_SYMBOL_REFRESH " Scan");
     btn_lbl(ui_wificonnectbutton, LV_SYMBOL_OK " Connect");
     btn_lbl(ui_wififorgetbutton, LV_SYMBOL_TRASH " Forget");
+
+    // Translation callbacks
+    reg(ui_autotranslate_toggle, cb_auto_translate_toggle);
+    btn_lbl(ui_autotranslate_toggle, LV_SYMBOL_LOOP " Auto-Translate");
+    if (ui_translate_lang_dd) {
+        lv_dropdown_set_options(ui_translate_lang_dd, translate_lang_list());
+        lv_dropdown_set_selected(ui_translate_lang_dd, g_translate_lang_idx);
+        reg(ui_translate_lang_dd, cb_translate_lang_changed, LV_EVENT_VALUE_CHANGED);
+    }
+    ui_apply_auto_translate_state();
 
     // Set initial label text
     if (ui_tg_toggle_lbl) lv_label_set_text(ui_tg_toggle_lbl, LV_SYMBOL_WIFI " Telegram Bridge");

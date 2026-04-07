@@ -42,6 +42,7 @@ String chat_path_for(const String& key);
 // Chat file I/O
 void append_chat_to_file(const String& key, bool out, const char* msg, uint32_t msg_ts = 0, const char* signal_info = nullptr);
 void update_last_tx_status_in_file(const String& key, char status, int16_t repeat_count = -1);
+void append_translation_to_last_rx(const String& key, const char* translation);
 void update_tx_status_by_msg_ts(const String& key, uint32_t msg_ts, char status);
 void load_chat_from_file(const String& key);
 void delete_chat_file_for_key(const String& key);

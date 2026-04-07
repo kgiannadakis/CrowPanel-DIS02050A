@@ -55,7 +55,7 @@ This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh comm
 
 | Firmware | Description |
 |----------|-------------|
-| **MeshCore** | Feature-rich mesh chat with a dark-themed LVGL touchscreen UI built entirely from scratch, with original features and WiFi functionality (Telegram bridge, web dashboard, web interface for PC control). |
+| **MeshCore** | Feature-rich mesh chat with a dark-themed LVGL touchscreen UI built entirely from scratch, with original features and WiFi functionality (Telegram bridge, web dashboard, translation, emoji support). |
 | **Meshtastic** | The popular open-source LoRa mesh platform, ported with minimum changes to work with the CrowPanel's wiring. Due to wiring constraints, some features (e.g. maps) do not work. |
 | **Boot Selector** | Simple touchscreen menu at startup to pick your firmware. Remembers your last choice. |
 
@@ -66,12 +66,17 @@ This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh comm
 | Feature | Details |
 |---------|---------|
 | **Custom UI** | Built from scratch with LVGL 8.3 — dark theme, portrait & landscape, Greek/English keyboards |
-| **Private Messages** | Per-message delivery tracking with automatic retries |
+| **Private Messages** | Per-message delivery tracking with automatic retries and resend button on failure |
 | **Channels** | Group messaging with receipt confirmation |
-| **Web Interface** | Full web dashboard accessible from any browser on your PC or phone — view contacts, channels, messages, and send/receive over WiFi |
-| **Telegram Bridge** | Channels forwarded to group topics, PMs to private bot chat, bidirectional messaging from Telegram |
-| **Contacts & Repeaters** | Full contact and repeater management with signal routing |
+| **Emoji Support** | Monochrome emoji keyboard (2 pages) + rendering of incoming emojis from phones |
+| **Translation** | Auto-translate or long-press to translate messages (Google Translate, English/Greek/Dutch/German/Italian/French) |
+| **Web Interface** | Full web dashboard accessible from any browser — view contacts, channels, messages, send/receive over WiFi |
+| **Telegram Bridge** | Channels to group topics, PMs to private bot chat, bidirectional messaging |
+| **Gesture Navigation** | Swipe left to go back, swipe up from bottom edge to go home |
+| **Signal Info** | Hop count and SNR displayed on each message, persisted in chat history |
+| **Contacts & Repeaters** | Full contact and repeater management with signal routing and path discovery |
 | **WiFi + NTP** | Time sync and connectivity for all bridge and web features |
+| **Persistent Settings** | TX power, language, auto-translate, and all preferences saved across reboots |
 
 ---
 
@@ -135,6 +140,21 @@ From the web interface you can:
 
 ---
 
+## Translation
+
+MeshCore supports automatic message translation via Google Translate:
+
+1. Go to **Web Apps** screen on the CrowPanel
+2. In the **Translation** section, select your target language
+3. Enable **Auto-Translate** to translate all incoming messages automatically
+4. Or leave it off and **long-press any incoming message** to translate on demand
+
+Supported target languages: English, Greek, Dutch, German, Italian, French.
+
+Translations appear below the original message in smaller, lighter text inside the same bubble.
+
+---
+
 ## Telegram Bridge
 
 Bridge your mesh conversations to Telegram with organized threading:
@@ -169,9 +189,10 @@ CrowPanel-DIS02050A/
 ## Acknowledgments
 
 - [Meshtastic](https://meshtastic.org/) — Open-source LoRa mesh networking
-- [MeshCore](https://github.com/rmendes76/MeshCore) — LoRa mesh chat framework
+- [MeshCore](https://github.com/meshcore-dev/MeshCore) — LoRa mesh chat framework
 - [Elecrow](https://www.elecrow.com/) — CrowPanel hardware
 - [LVGL](https://lvgl.io/) — Embedded graphics library
+- [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) — Monochrome emoji font
 
 ---
 

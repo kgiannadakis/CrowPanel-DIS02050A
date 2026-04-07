@@ -11,6 +11,11 @@ extern lv_obj_t* ui_featuresscreen;
 void ui_featuresscreen_screen_init(void);
 void ui_featuresscreen_screen_destroy(void);
 
+// Translation widgets
+extern lv_obj_t* ui_autotranslate_toggle;
+extern lv_obj_t* ui_autotranslate_lbl;
+extern lv_obj_t* ui_translate_lang_dd;
+
 // Telegram widgets
 extern lv_obj_t* ui_tg_toggle;
 extern lv_obj_t* ui_tg_toggle_lbl;

@@ -13,6 +13,11 @@
 
 lv_obj_t* ui_featuresscreen = NULL;
 
+// Translation
+lv_obj_t* ui_autotranslate_toggle = NULL;
+lv_obj_t* ui_autotranslate_lbl    = NULL;
+lv_obj_t* ui_translate_lang_dd    = NULL;
+
 // Telegram
 lv_obj_t* ui_tg_toggle     = NULL;
 lv_obj_t* ui_tg_toggle_lbl = NULL;
@@ -170,7 +175,7 @@ void ui_featuresscreen_screen_init(void) {
         lv_obj_set_style_pad_bottom(hint, 2, 0);
     }
 
-    ui_wifitoggle = make_action_btn(form, &ui_wifitoggle_lbl, lv_pct(100), 48);
+    ui_wifitoggle = make_action_btn(form, &ui_wifitoggle_lbl, lv_pct(100), 72);
 
     {
         lv_obj_t* wifi_btn_row = lv_obj_create(form);
@@ -212,45 +217,24 @@ void ui_featuresscreen_screen_init(void) {
     lv_obj_set_style_text_font(ui_wifistatuslabel, &lv_font_montserrat_14, 0);
 
     // ══════════════════════════════════════════════════════════
-    // TELEGRAM BRIDGE
+    // TRANSLATION
     // ══════════════════════════════════════════════════════════
 
-    make_section_hdr(form, "TELEGRAM BRIDGE");
+    make_section_hdr(form, "TRANSLATION");
+    {
+        lv_obj_t* hint = lv_label_create(form);
+        lv_label_set_text(hint, "Auto-translate or long-press a message");
+        lv_obj_set_width(hint, lv_pct(100));
+        lv_obj_set_style_text_color(hint, lv_color_hex(TH_TEXT3), 0);
+        lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_pad_bottom(hint, 2, 0);
+    }
 
-    // Enable toggle
-    ui_tg_toggle = make_action_btn(form, &ui_tg_toggle_lbl, lv_pct(100), 44);
+    ui_autotranslate_toggle = make_action_btn(form, &ui_autotranslate_lbl, lv_pct(100), 48);
 
-    // Bot Token
-    lv_obj_t* tok_lbl = lv_label_create(form);
-    lv_label_set_text(tok_lbl, "Bot Token");
-    lv_obj_set_style_text_color(tok_lbl, lv_color_hex(TH_TEXT2), 0);
-    lv_obj_set_style_text_font(tok_lbl, &lv_font_montserrat_14, 0);
-
-    ui_tg_token_ta = lv_textarea_create(form);
-    lv_textarea_set_one_line(ui_tg_token_ta, true);
-    lv_textarea_set_placeholder_text(ui_tg_token_ta, "Paste bot token from @BotFather");
-    lv_textarea_set_password_show_time(ui_tg_token_ta, 0);
-    lv_textarea_set_password_mode(ui_tg_token_ta, true);
-    lv_obj_set_width(ui_tg_token_ta, lv_pct(100));
-    style_ta(ui_tg_token_ta);
-
-    // Chat ID
-    lv_obj_t* cid_lbl = lv_label_create(form);
-    lv_label_set_text(cid_lbl, "Chat ID");
-    lv_obj_set_style_text_color(cid_lbl, lv_color_hex(TH_TEXT2), 0);
-    lv_obj_set_style_text_font(cid_lbl, &lv_font_montserrat_14, 0);
-
-    ui_tg_chatid_ta = lv_textarea_create(form);
-    lv_textarea_set_one_line(ui_tg_chatid_ta, true);
-    lv_textarea_set_placeholder_text(ui_tg_chatid_ta, "e.g. -1001234567890");
-    lv_obj_set_width(ui_tg_chatid_ta, lv_pct(100));
-    style_ta(ui_tg_chatid_ta);
-
-    // Status
-    ui_tg_status_lbl = lv_label_create(form);
-    lv_label_set_text(ui_tg_status_lbl, "Disabled");
-    lv_obj_set_style_text_color(ui_tg_status_lbl, lv_color_hex(TH_TEXT3), 0);
-    lv_obj_set_style_text_font(ui_tg_status_lbl, &lv_font_montserrat_14, 0);
+    ui_translate_lang_dd = lv_dropdown_create(form);
+    lv_obj_set_width(ui_translate_lang_dd, lv_pct(100));
+    style_dd(ui_translate_lang_dd);
 
     // ══════════════════════════════════════════════════════════
     // WEB DASHBOARD
@@ -264,6 +248,43 @@ void ui_featuresscreen_screen_init(void) {
     lv_label_set_text(ui_wd_status_lbl, "Disabled");
     lv_obj_set_style_text_color(ui_wd_status_lbl, lv_color_hex(TH_TEXT3), 0);
     lv_obj_set_style_text_font(ui_wd_status_lbl, &lv_font_montserrat_14, 0);
+
+    // ══════════════════════════════════════════════════════════
+    // TELEGRAM BRIDGE
+    // ══════════════════════════════════════════════════════════
+
+    make_section_hdr(form, "TELEGRAM BRIDGE");
+
+    ui_tg_toggle = make_action_btn(form, &ui_tg_toggle_lbl, lv_pct(100), 44);
+
+    lv_obj_t* tok_lbl = lv_label_create(form);
+    lv_label_set_text(tok_lbl, "Bot Token");
+    lv_obj_set_style_text_color(tok_lbl, lv_color_hex(TH_TEXT2), 0);
+    lv_obj_set_style_text_font(tok_lbl, &lv_font_montserrat_14, 0);
+
+    ui_tg_token_ta = lv_textarea_create(form);
+    lv_textarea_set_one_line(ui_tg_token_ta, true);
+    lv_textarea_set_placeholder_text(ui_tg_token_ta, "Paste bot token from @BotFather");
+    lv_textarea_set_password_show_time(ui_tg_token_ta, 0);
+    lv_textarea_set_password_mode(ui_tg_token_ta, true);
+    lv_obj_set_width(ui_tg_token_ta, lv_pct(100));
+    style_ta(ui_tg_token_ta);
+
+    lv_obj_t* cid_lbl = lv_label_create(form);
+    lv_label_set_text(cid_lbl, "Chat ID");
+    lv_obj_set_style_text_color(cid_lbl, lv_color_hex(TH_TEXT2), 0);
+    lv_obj_set_style_text_font(cid_lbl, &lv_font_montserrat_14, 0);
+
+    ui_tg_chatid_ta = lv_textarea_create(form);
+    lv_textarea_set_one_line(ui_tg_chatid_ta, true);
+    lv_textarea_set_placeholder_text(ui_tg_chatid_ta, "e.g. -1001234567890");
+    lv_obj_set_width(ui_tg_chatid_ta, lv_pct(100));
+    style_ta(ui_tg_chatid_ta);
+
+    ui_tg_status_lbl = lv_label_create(form);
+    lv_label_set_text(ui_tg_status_lbl, "Disabled");
+    lv_obj_set_style_text_color(ui_tg_status_lbl, lv_color_hex(TH_TEXT3), 0);
+    lv_obj_set_style_text_font(ui_tg_status_lbl, &lv_font_montserrat_14, 0);
 
     // ══════════════════════════════════════════════════════════
     // FIRMWARE UPDATE

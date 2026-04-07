@@ -106,11 +106,18 @@ static void touch_cb(lv_indev_drv_t*, lv_indev_data_t* d) {
   }
   if (!pressed && g_touch_was_press && g_swipe_tracking) {
     g_swipe_tracking = false;
-    if (g_in_chat_mode) {
+    // Don't detect gestures when keyboard is visible
+    bool kb_visible = (ui_Keyboard1 && !lv_obj_has_flag(ui_Keyboard1, LV_OBJ_FLAG_HIDDEN));
+    if (!kb_visible) {
       int16_t dx = (int16_t)tx_touch - (int16_t)g_swipe_start_x;
       int16_t dy = (int16_t)ty_touch - (int16_t)g_swipe_start_y;
+      // Swipe left → go back (works on all screens)
       if (dx < -80 && (dy > -60 && dy < 60)) {
         g_deferred_swipe_back = true;
+      }
+      // Swipe up from bottom edge → go to home screen
+      if (dy < -80 && (dx > -60 && dx < 60) && g_swipe_start_y > (SCR_H - 100)) {
+        g_deferred_swipe_home = true;
       }
     }
   }
@@ -195,14 +202,53 @@ static const char * const custom_kb_map_sym[] = {
     "+","-","*","/","=","%","!","?","@","#", "\n",
     "(",")","{","}","[","]","\\",";","\"","'", LV_SYMBOL_NEW_LINE, "\n",
     "_","~","<",">","$","^","&",".","," ,":", "\n",
-    "abc"," ", "?", LV_SYMBOL_OK, ""
+    "abc","Emoji"," ", "?", LV_SYMBOL_OK, ""
 };
 static const lv_btnmatrix_ctrl_t custom_kb_ctrl_sym[] = {
     _KB_N,_KB_N,_KB_N,_KB_N,_KB_N,_KB_N,_KB_N,_KB_N,_KB_N,_KB_N, LV_BTNMATRIX_CTRL_CHECKED|2,
     _KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,
     _KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS, LV_BTNMATRIX_CTRL_CHECKED|7,
     _KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,_KB_XS,
-    _KB_CTRL|2, 6, LV_BTNMATRIX_CTRL_CHECKED|2, _KB_CTRL|2
+    _KB_CTRL|2, _KB_CTRL|2, 4, LV_BTNMATRIX_CTRL_CHECKED|2, _KB_CTRL|2
+};
+
+// Emoji keyboard pages (using LV_KEYBOARD_MODE_NUMBER)
+// Page 1: faces
+static const char * const kb_emoji_1[] = {
+    "\xF0\x9F\x98\x80","\xF0\x9F\x98\x83","\xF0\x9F\x98\x84","\xF0\x9F\x98\x81","\xF0\x9F\x98\x86","\xF0\x9F\x98\x85","\xF0\x9F\x98\x82","\xF0\x9F\xA4\xA3","\xF0\x9F\x98\x8A","\xF0\x9F\x98\x87", LV_SYMBOL_BACKSPACE, "\n",
+    "\xF0\x9F\x98\x8D","\xF0\x9F\xA5\xB0","\xF0\x9F\x98\x98","\xF0\x9F\x98\x9A","\xF0\x9F\x98\x8B","\xF0\x9F\x98\x9B","\xF0\x9F\x98\x9C","\xF0\x9F\xA4\xAA","\xF0\x9F\x98\x9D","\xF0\x9F\xA4\x91", "\n",
+    "\xF0\x9F\xA4\x97","\xF0\x9F\xA4\x94","\xF0\x9F\x98\x8E","\xF0\x9F\xA4\xA9","\xF0\x9F\x98\x8F","\xF0\x9F\x98\x92","\xF0\x9F\x98\x9E","\xF0\x9F\x98\xA2","\xF0\x9F\x98\xAD","\xF0\x9F\x98\xA4", "\n",
+    "\xF0\x9F\x98\xA1","\xF0\x9F\xA4\xAC","\xF0\x9F\x98\xB1","\xF0\x9F\x98\xB0","\xF0\x9F\xA5\xBA","\xF0\x9F\x98\xB4","\xF0\x9F\x92\xA9","\xF0\x9F\x92\x80","\xF0\x9F\x91\xBB","\xF0\x9F\x91\xBD", "\n",
+    "abc","\xE2\x96\xB6"," ", LV_SYMBOL_OK, ""
+};
+// 😀😃😄😁😆😅😂🤣😊😇 ⌫
+// 😍🥰😘😚😋😛😜🤪😝🤑
+// 🤗🤔😎🤩😏😒😞😢😭😤
+// 😡🤬😱😰🥺😴💩💀👻👽
+// abc ▶ [space] ✓
+
+// Page 2: hands, hearts, objects
+static const char * const kb_emoji_2[] = {
+    "\xF0\x9F\x91\x8D","\xF0\x9F\x91\x8E","\xF0\x9F\x91\x8F","\xF0\x9F\x99\x8C","\xF0\x9F\x91\x8A","\xE2\x9C\x8A","\xE2\x9C\x8C","\xF0\x9F\xA4\x9E","\xE2\x9C\x8B","\xF0\x9F\x99\x8F", LV_SYMBOL_BACKSPACE, "\n",
+    "\xE2\x9D\xA4","\xF0\x9F\xA7\xA1","\xF0\x9F\x92\x9B","\xF0\x9F\x92\x9A","\xF0\x9F\x92\x99","\xF0\x9F\x92\x9C","\xF0\x9F\x96\xA4","\xF0\x9F\x92\x94","\xF0\x9F\x94\xA5","\xF0\x9F\x92\xAF", "\n",
+    "\xE2\x9C\x85","\xE2\x9C\xA8","\xE2\xAD\x90","\xF0\x9F\x8C\x9F","\xF0\x9F\x8E\x89","\xF0\x9F\x8E\x81","\xF0\x9F\x8F\x86","\xF0\x9F\x92\xB0","\xF0\x9F\x93\xB1","\xF0\x9F\x92\xBB", "\n",
+    "\xF0\x9F\x8D\xBB","\xF0\x9F\x8D\xBA","\xF0\x9F\x8D\xBD","\xF0\x9F\x8D\xBE","\xE2\x98\x80","\xE2\x9B\x85","\xE2\x9B\x84","\xE2\x9B\xBD","\xE2\x9B\xB5","\xE2\x9B\xAA", "\n",
+    "abc","\xE2\x97\x80"," ", LV_SYMBOL_OK, ""
+};
+// 👍👎👏🙌👊✊✌🤞✋🙏 ⌫
+// ❤🧡💛💚💙💜🖤💔🔥💯
+// ✅✨⭐🌟🎉🎁🏆💰📱💻
+// 🍻🍺🍽🍾☀⛅⛄⛽⛵⛪
+// abc ◀ [space] ✓
+
+static int s_emoji_page = 0;
+
+static const lv_btnmatrix_ctrl_t kb_ctrl_emoji[] = {
+    _KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC, LV_BTNMATRIX_CTRL_CHECKED|2,
+    _KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,
+    _KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,
+    _KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,_KB_LC,
+    _KB_CTRL|2, _KB_CTRL|2, 4, _KB_CTRL|2
 };
 
 // ---- Keyboard functions ----
@@ -216,6 +262,8 @@ void kb_apply_language(lv_obj_t* kb) {
     lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_TEXT_UPPER, (const char**)kb_en_uc, kb_ctrl_uc);
   }
   lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_SPECIAL, (const char**)custom_kb_map_sym, custom_kb_ctrl_sym);
+  // Emoji page 1 as default
+  lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_NUMBER, (const char**)kb_emoji_1, kb_ctrl_emoji);
 }
 
 static void cb_kb_value_changed(lv_event_t* e) {
@@ -235,6 +283,24 @@ static void cb_kb_value_changed(lv_event_t* e) {
         return;
     }
 
+    if (strcmp(txt, "Emoji") == 0) {
+        s_emoji_page = 0;
+        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
+        return;
+    }
+    // Emoji page navigation: ▶ = next page, ◀ = prev page
+    if (strcmp(txt, "\xE2\x96\xB6") == 0) {  // ▶
+        s_emoji_page = 1;
+        lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_NUMBER, (const char**)kb_emoji_2, kb_ctrl_emoji);
+        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
+        return;
+    }
+    if (strcmp(txt, "\xE2\x97\x80") == 0) {  // ◀
+        s_emoji_page = 0;
+        lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_NUMBER, (const char**)kb_emoji_1, kb_ctrl_emoji);
+        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
+        return;
+    }
     if (strcmp(txt, "EL") == 0) {
         g_kb_greek = true;
         kb_apply_language(kb);
@@ -360,7 +426,7 @@ void init_display_and_ui() {
 
   static lv_indev_drv_t id; lv_indev_drv_init(&id);
   id.type = LV_INDEV_TYPE_POINTER; id.read_cb = touch_cb;
-  id.long_press_time = 1800;
+  id.long_press_time = 500;
   lv_indev_drv_register(&id);
 
   {

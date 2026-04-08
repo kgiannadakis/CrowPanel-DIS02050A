@@ -286,55 +286,6 @@ void ui_featuresscreen_screen_init(void) {
     lv_obj_set_style_text_color(ui_tg_status_lbl, lv_color_hex(TH_TEXT3), 0);
     lv_obj_set_style_text_font(ui_tg_status_lbl, &lv_font_montserrat_14, 0);
 
-    // ══════════════════════════════════════════════════════════
-    // FIRMWARE UPDATE
-    // ══════════════════════════════════════════════════════════
-
-    make_section_hdr(form, "FIRMWARE UPDATE");
-
-    // Version label
-    lv_obj_t* ver_lbl = lv_label_create(form);
-    {
-        char vbuf[48];
-        snprintf(vbuf, sizeof(vbuf), "Current: v%s", FIRMWARE_VERSION);
-        lv_label_set_text(ver_lbl, vbuf);
-    }
-    lv_obj_set_style_text_color(ver_lbl, lv_color_hex(TH_TEXT2), 0);
-    lv_obj_set_style_text_font(ver_lbl, &lv_font_montserrat_14, 0);
-
-    // Repo text area
-    lv_obj_t* repo_lbl = lv_label_create(form);
-    lv_label_set_text(repo_lbl, "GitHub Repo");
-    lv_obj_set_style_text_color(repo_lbl, lv_color_hex(TH_TEXT2), 0);
-    lv_obj_set_style_text_font(repo_lbl, &lv_font_montserrat_14, 0);
-
-    ui_ota_repo_ta = lv_textarea_create(form);
-    lv_textarea_set_one_line(ui_ota_repo_ta, true);
-    lv_textarea_set_placeholder_text(ui_ota_repo_ta, "owner/repo");
-    lv_obj_set_width(ui_ota_repo_ta, lv_pct(100));
-    style_ta(ui_ota_repo_ta);
-
-    // Check button
-    ui_ota_check_btn = make_action_btn(form, &ui_ota_check_lbl, lv_pct(100), 48);
-
-    // Progress bar (hidden initially)
-    ui_ota_progress_bar = lv_bar_create(form);
-    lv_obj_set_width(ui_ota_progress_bar, lv_pct(100));
-    lv_obj_set_height(ui_ota_progress_bar, 16);
-    lv_bar_set_range(ui_ota_progress_bar, 0, 100);
-    lv_bar_set_value(ui_ota_progress_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(ui_ota_progress_bar, lv_color_hex(TH_SURFACE2), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(ui_ota_progress_bar, lv_color_hex(TH_GREEN), LV_PART_INDICATOR);
-    lv_obj_set_style_radius(ui_ota_progress_bar, 8, LV_PART_MAIN);
-    lv_obj_set_style_radius(ui_ota_progress_bar, 8, LV_PART_INDICATOR);
-    lv_obj_add_flag(ui_ota_progress_bar, LV_OBJ_FLAG_HIDDEN);
-
-    // Status label
-    ui_ota_status_lbl = lv_label_create(form);
-    lv_label_set_text(ui_ota_status_lbl, "");
-    lv_obj_set_style_text_color(ui_ota_status_lbl, lv_color_hex(TH_TEXT3), 0);
-    lv_obj_set_style_text_font(ui_ota_status_lbl, &lv_font_montserrat_14, 0);
-
     // ── TAB BAR ─────────────────────────────────────────────
 
     ui_tabbar_create(ui_featuresscreen, 2);

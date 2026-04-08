@@ -39,7 +39,7 @@ void ota_init() {
 #if defined(ESP32)
     Preferences prefs;
     prefs.begin("ota", true);
-    String repo = prefs.getString("repo", "");
+    String repo = prefs.getString("repo", "kgiannadakis/CrowPanel-DIS02050A");
     strncpy(s_repo, repo.c_str(), sizeof(s_repo) - 1);
     prefs.end();
 #endif

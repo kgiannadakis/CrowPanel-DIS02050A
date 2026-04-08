@@ -127,8 +127,6 @@ python -m esptool --chip esp32s3 --port <PORT> --baud 921600 write_flash \
 
 Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).
 
-> **Note:** After the first flash, you can update MeshCore and Meshtastic over-the-air from the boot selector's **Update Firmware** button — no cables needed.
-
 ---
 
 ## Web Interface

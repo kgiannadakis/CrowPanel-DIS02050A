@@ -112,14 +112,22 @@ The dual-boot system requires the specific `partitions.bin` included in the repo
 
 > **Note:** The build and flash process will take several minutes — be patient! The first boot after installation will also be longer than usual.
 
-### Build Individual Projects
+### Flash Pre-Built Binaries
 
-If you prefer to flash only one of the two firmwares, build them manually:
+If you don't want to build from source, download the pre-built binaries from the [latest release](https://github.com/kgiannadakis/CrowPanel-DIS02050A/releases/latest) and flash them directly:
 
 ```bash
-pio run -d meshcore  -e crowpanel_v11_lvgl_chat
-pio run -d meshtastic -e elecrow-adv1-43-50-70-tft
+python -m esptool --chip esp32s3 --port <PORT> --baud 921600 write_flash \
+  0x0000   bootloader.bin \
+  0x8000   partitions.bin \
+  0x10000  selector.bin \
+  0x110000 meshcore.bin \
+  0x660000 meshtastic.bin
 ```
+
+Replace `<PORT>` with your serial port (e.g. `COM20` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial` on macOS).
+
+> **Note:** After the first flash, you can update MeshCore and Meshtastic over-the-air from the boot selector's **Update Firmware** button — no cables needed.
 
 ---
 

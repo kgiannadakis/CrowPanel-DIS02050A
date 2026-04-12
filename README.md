@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">CrowPanel Advance 5" (DIS02050A v1.1)<br>Dual-Boot LoRa Mesh Firmware</h1>
   <p align="center">
-    Run <b>MeshCore</b> or <b>Meshtastic</b> on your CrowPanel — switch at boot, no reflashing.
+    Run <b>MeshCore</b> or a custom <b>Meshtastic</b> UI on your CrowPanel - switch at boot, no reflashing.
   </p>
   <p align="center">
     <img src="https://img.shields.io/badge/ESP32--S3-LoRa_Mesh-blue?style=flat-square" alt="ESP32-S3">
@@ -51,13 +51,13 @@
 
 ## Overview
 
-This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh communicator with a full touchscreen UI. A boot selector lets you choose which firmware to run at startup — no cables, no reflashing.
+This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh communicator with a full touchscreen UI. A boot selector lets you choose which firmware to run at startup, connect to WiFi, and update the app firmwares from GitHub releases.
 
 | Firmware | Description |
 |----------|-------------|
 | **MeshCore** | Feature-rich mesh chat with a dark-themed LVGL touchscreen UI built entirely from scratch, with original features and WiFi functionality (Telegram bridge, web dashboard, translation, emoji support). |
-| **Meshtastic** | The popular open-source LoRa mesh platform, ported with minimum changes to work with the CrowPanel's wiring. Due to wiring constraints, some features (e.g. maps) do not work. |
-| **Boot Selector** | Simple touchscreen menu at startup to pick your firmware. Remembers your last choice. |
+| **Meshtastic** | Custom CrowPanel-focused Meshtastic UI with touch chat screens, nodes, settings, private chat actions, and CrowPanel display/backlight support. |
+| **Boot Selector** | Touchscreen dual-boot menu with WiFi setup and OTA app firmware updates from GitHub releases. Remembers your last choice. |
 
 ---
 
@@ -77,6 +77,31 @@ This project turns the **CrowPanel Advance 5"** into a standalone LoRa mesh comm
 | **Contacts & Repeaters** | Full contact and repeater management with signal routing and path discovery |
 | **WiFi + NTP** | Time sync and connectivity for all bridge and web features |
 | **Persistent Settings** | TX power, language, auto-translate, and all preferences saved across reboots |
+
+---
+
+## Meshtastic Features
+
+| Feature | Details |
+|---------|---------|
+| **Custom UI** | CrowPanel-focused Meshtastic interface with chat list, message view, nodes, and settings screens |
+| **Touch Keyboard** | On-screen keyboard with a MeshCore-style layout tuned for the 5" display |
+| **Private Chats** | Long-press private chats to delete local chat history with confirmation |
+| **Security Tools** | Regenerate private keys directly from settings |
+| **Radio Defaults** | TX power defaults to 20 dBm, with 22 dBm still available as a manual option |
+| **CrowPanel Display** | Dedicated LVGL display setup, backlight handling, and safer display buffer fallback |
+
+---
+
+## OTA Bootloader
+
+| Feature | Details |
+|---------|---------|
+| **Dual Boot** | Choose MeshCore or Meshtastic at startup from a touchscreen selector |
+| **WiFi Setup** | Configure WiFi directly from the selector before updating |
+| **OTA Updates** | Downloads the latest `meshcore.bin` and `meshtastic.bin` from GitHub releases |
+| **Protected Core** | OTA updates replace only the app firmware slots; bootloader, selector, and partitions are not updated |
+| **Version Display** | Shows detected MeshCore and Meshtastic firmware versions on the boot buttons |
 
 ---
 

@@ -798,7 +798,11 @@ void NodeDB::initConfigIntervals()
     config.power.sds_secs = default_sds_secs;
     config.power.wait_bluetooth_secs = default_wait_bluetooth_secs;
 
+#ifdef DEFAULT_SCREEN_ON_SECS
+    config.display.screen_on_secs = DEFAULT_SCREEN_ON_SECS;
+#else
     config.display.screen_on_secs = default_screen_on_secs;
+#endif
 
 #if defined(USE_POWERSAVE)
     config.power.is_power_saving = true;

@@ -24,7 +24,7 @@ def esp32_create_combined_bin(source, target, env):
     # https://github.com/letscontrolit/ESPEasy/blob/mega/tools/pio/post_esp32.py
     print("Generating combined binary for serial flashing")
 
-    app_offset = 0x10000
+    app_offset = int(env.subst("$ESP32_APP_OFFSET"), 0)
 
     new_file_name = env.subst("$BUILD_DIR/${PROGNAME}.factory.bin")
     sections = env.subst(env.get("FLASH_EXTRA_IMAGES"))
@@ -68,7 +68,14 @@ def esp32_create_combined_bin(source, target, env):
     esptool.main(cmd)
 
 
-env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", esp32_create_combined_bin)
+app_partition = env.GetProjectOption("custom_meshtastic_app_partition", "app0")
+if app_partition in ("app0", "factory"):
+    env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", esp32_create_combined_bin)
+else:
+    print(
+        "Skipping combined factory binary for custom app partition "
+        f"{app_partition}; use partition-targeted artifacts instead"
+    )
 
 esp32_kind = env.GetProjectOption("custom_esp32_kind")
 if esp32_kind == "esp32":

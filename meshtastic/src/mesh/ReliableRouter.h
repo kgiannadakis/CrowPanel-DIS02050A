@@ -3,6 +3,26 @@
 #include "NextHopRouter.h"
 
 /**
+ * Optional observer hook for ACK/NAK arrivals.
+ *
+ * When a Routing packet addressed to us lands that references a pending
+ * outgoing packet id (via request_id), ReliableRouter::sniffReceived will
+ * invoke this callback BEFORE the pending retransmission entry is removed.
+ *
+ * - `from` is the node the ACK/NAK was destined to (i.e. us, the original
+ *    sender of the packet being acked)
+ * - `id` is the original outgoing packet id
+ * - `isAck` is true when error_reason == Routing_Error_NONE, false for any
+ *    NAK error code
+ *
+ * Used by the mcui layer to distinguish real ACKs from retry exhaustion so
+ * the chat bubble can show "acknowledged" vs "failed". Only one observer is
+ * supported; mcui registers it at startup. Left null when mcui is disabled.
+ */
+typedef void (*AckNakObserverFn)(NodeNum from, PacketId id, bool isAck);
+extern AckNakObserverFn g_ackNakObserver;
+
+/**
  * This is a mixin that extends Router with the ability to do (one hop only) reliable message sends.
  */
 class ReliableRouter : public NextHopRouter

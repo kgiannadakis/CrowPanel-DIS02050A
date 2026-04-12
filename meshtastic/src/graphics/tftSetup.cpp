@@ -1,5 +1,13 @@
 #if HAS_TFT
 
+#if USE_MCUI
+// ============================================================
+//  Custom portrait MeshCore-style UI (mcui) — replaces device-ui
+// ============================================================
+#include "mcui/McUI.h"
+void tftSetup(void) { mcui::setup(); }
+#else
+
 #include "SPILock.h"
 #include "sleep.h"
 
@@ -134,4 +142,5 @@ void tftSetup(void)
     }
 }
 
-#endif
+#endif // !USE_MCUI
+#endif // HAS_TFT

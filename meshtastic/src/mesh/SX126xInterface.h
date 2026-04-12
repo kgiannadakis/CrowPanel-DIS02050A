@@ -28,6 +28,11 @@ template <class T> class SX126xInterface : public RadioLibInterface
 
     bool isIRQPending() override { return lora.getIrqFlags() != 0; }
 
+    /// RadioLib SX126x exposes `getRSSI(bool packet)` — with packet=false
+    /// it returns the current (instantaneous) channel RSSI in dBm, which
+    /// is the RX noise floor when no packet is being received.
+    float getNoiseFloor() override { return lora.getRSSI(false); }
+
     void resetAGC() override;
 
     void setTCXOVoltage(float voltage) { tcxoVoltage = voltage; }

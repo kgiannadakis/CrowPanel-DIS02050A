@@ -1,6 +1,6 @@
 #if RADIOLIB_EXCLUDE_SX126X != 1
-#include "SX126xInterface.h"
 #include "configuration.h"
+#include "SX126xInterface.h"
 #include "error.h"
 #include "mesh/NodeDB.h"
 #ifdef ARCH_PORTDUINO
@@ -20,6 +20,12 @@
 #endif
 #ifndef SX126X_MAX_POWER
 #define SX126X_MAX_POWER 22
+#endif
+#ifndef SX126X_REGISTER_PATCH_0X8B5
+#define SX126X_REGISTER_PATCH_0X8B5 1
+#endif
+#ifndef SX126X_FORCE_CONTINUOUS_RX
+#define SX126X_FORCE_CONTINUOUS_RX 0
 #endif
 
 template <typename T>
@@ -165,13 +171,17 @@ template <typename T> bool SX126xInterface<T>::init()
         LOG_INFO("Set RX gain to power saving mode (boosted mode off); result: %d", result);
     }
 
+#if SX126X_REGISTER_PATCH_0X8B5
     // Undocumented SX1262 register patch recommended by Heltec/Semtech for improved RX sensitivity.
-    // Sets bit 0 of register 0x8B5.
+    // Sets bit 0 of register 0x8B5. Keep this build-toggleable for CrowPanel A/B testing.
     if (module.SPIsetRegValue(0x8B5, 0x01, 0, 0) == RADIOLIB_ERR_NONE) {
         LOG_INFO("Applied SX1262 register 0x8B5 patch for RX improvement");
     } else {
         LOG_WARN("Failed to apply SX1262 register 0x8B5 patch for RX improvement");
     }
+#else
+    LOG_INFO("Skipped SX1262 register 0x8B5 patch by build flag");
+#endif
 
 #if 0
     // Read/write a register we are not using (only used for FSK mode) to test SPI comms
@@ -315,10 +325,16 @@ template <typename T> void SX126xInterface<T>::startReceive()
     setTransmitEnable(false);
     setStandby();
 
+#if SX126X_FORCE_CONTINUOUS_RX
+    int err = lora.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF, MESHTASTIC_RADIOLIB_IRQ_RX_FLAGS);
+    if (err != RADIOLIB_ERR_NONE)
+        LOG_ERROR("SX126X startReceive %s%d", radioLibErr, err);
+#else
     // We use a 16 bit preamble so this should save some power by letting radio sit in standby mostly.
     int err = lora.startReceiveDutyCycleAuto(preambleLength, 8, MESHTASTIC_RADIOLIB_IRQ_RX_FLAGS);
     if (err != RADIOLIB_ERR_NONE)
         LOG_ERROR("SX126X startReceiveDutyCycleAuto %s%d", radioLibErr, err);
+#endif
 #ifdef ARCH_PORTDUINO
     if (err != RADIOLIB_ERR_NONE)
         portduino_status.LoRa_in_error = true;

@@ -1,7 +1,14 @@
-nvs,      data, nvs,     0x9000,  0x5000,
-otadata,  data, ota,     0xe000,  0x2000,
-factory,  app,  factory, 0x10000, 0x100000,
-ota_0,    app,  ota_0,   0x110000,0x570000,
-ota_1,    app,  ota_1,   0x680000,0x570000,
-spiffs,   data, spiffs,  0xBF0000,0x400000,
-coredump, data, coredump,0xFF0000,0x10000,
+# Dual-boot partition table for CrowPanel-DIS02050A.
+# Keep this byte-compatible with the repo-root partitions.bin:
+# factory = boot selector, ota_0 = MeshCore, ota_1 = Meshtastic.
+# mcdata and mtdata hold MeshCore/Meshtastic settings and must not be
+# overwritten by selector-only uploads.
+# Name,   Type, SubType, Offset,   Size,    Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+factory,  app,  factory, 0x10000,  0x100000,
+ota_0,    app,  ota_0,   0x110000, 0x550000,
+ota_1,    app,  ota_1,   0x660000, 0x550000,
+mcdata,   data, spiffs,  0xbb0000, 0x1a0000,
+mtdata,   data, spiffs,  0xd50000, 0x290000,
+coredump, data, coredump,0xfe0000, 0x10000,

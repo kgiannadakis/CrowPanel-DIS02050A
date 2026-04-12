@@ -10,6 +10,10 @@
 
 // ReliableRouter::ReliableRouter() {}
 
+// Optional ACK/NAK landing observer. See ReliableRouter.h for semantics.
+// Left null when the mcui layer is disabled; populated at mcui startup.
+AckNakObserverFn g_ackNakObserver = nullptr;
+
 /**
  * If the message is want_ack, then add it to a list of packets to retransmit.
  * If we run out of retransmissions, send a nak packet towards the original client to indicate failure.
@@ -149,6 +153,12 @@ void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
             // Implicit ACKs from MQTT should not stop retransmissions
             !(isFromUs(p) && p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MQTT)) {
             LOG_DEBUG("Received a %s for 0x%x, stopping retransmissions", ackId ? "ACK" : "NAK", ackId);
+            // Notify any registered observer BEFORE tearing down the pending
+            // entry. The mcui layer uses this to flip its chat bubble from
+            // "sent" to "acknowledged" (ACK) or "failed" (NAK).
+            if (g_ackNakObserver) {
+                g_ackNakObserver(p->to, ackId ? ackId : nakId, ackId != 0);
+            }
             if (ackId) {
                 stopRetransmission(p->to, ackId);
             } else {

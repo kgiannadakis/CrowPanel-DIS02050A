@@ -37,6 +37,11 @@ class TraceRouteModule : public ProtobufModule<meshtastic_RouteDiscovery>,
     virtual Observable<const UIFrameEvent *> *getUIFrameObservable() override { return this; }
 
     void processUpgradedPacket(const meshtastic_MeshPacket &mp);
+    TraceRouteRunState getRunState() const { return runState; }
+    String getResultText() const { return resultText; }
+    String getBannerText() const { return bannerText; }
+    NodeNum getTracingNode() const { return tracingNode; }
+    unsigned long getLastTraceRouteTime() const { return lastTraceRouteTime; }
 
   protected:
     bool handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_RouteDiscovery *r) override;

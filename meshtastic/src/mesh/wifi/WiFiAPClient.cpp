@@ -32,8 +32,14 @@ static void WiFiEvent(WiFiEvent_t event);
 #include <NTPClient.h>
 #endif
 
+#if HAS_TFT && USE_MCUI
+#include "graphics/mcui/data/McClock.h"
+#endif
+
 #if !MESHTASTIC_EXCLUDE_TZ && defined(ARCH_ESP32)
 #include <HTTPClient.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #endif
 
 using namespace concurrency;
@@ -66,6 +72,10 @@ bool isReconnecting = false; // If we are currently reconnecting
 // ---------------------------------------------------------------------------
 #if !MESHTASTIC_EXCLUDE_TZ && defined(ARCH_ESP32)
 static bool tzAutoDetected = false;
+static volatile bool tzDetectInFlight = false;
+static volatile bool tzResultReady = false;
+static bool tzResultSuccess = false;
+static char tzDetectedDef[sizeof(config.device.tzdef)] = {};
 
 struct IanaToPosix {
     const char *iana;
@@ -172,11 +182,18 @@ static void posixFromUtcOffset(const char *offset, char *out, size_t outLen)
         strncpy(out, "UTC0", outLen);
 }
 
+static void copyTzDef(char *out, size_t outLen, const char *tz)
+{
+    if (!out || outLen == 0) return;
+    strncpy(out, tz ? tz : "", outLen - 1);
+    out[outLen - 1] = '\0';
+}
+
 static uint8_t tzRetryCount = 0;
 static const uint8_t TZ_MAX_RETRIES = 5;
 
 // Try to extract IANA timezone from a JSON response (works for worldtimeapi and ip-api)
-static bool parseTimezoneFromJson(const String &payload)
+static bool parseTimezoneFromJson(const String &payload, char *out, size_t outLen)
 {
     // Try "timezone":"Region/City" (worldtimeapi format)
     int tzIdx = payload.indexOf("\"timezone\":\"");
@@ -201,8 +218,7 @@ static bool parseTimezoneFromJson(const String &payload)
 
     if (posix) {
         LOG_INFO("Auto-TZ: %s -> %s", iana.c_str(), posix);
-        strncpy(config.device.tzdef, posix, sizeof(config.device.tzdef) - 1);
-        config.device.tzdef[sizeof(config.device.tzdef) - 1] = '\0';
+        copyTzDef(out, outLen, posix);
         return true;
     }
 
@@ -216,8 +232,7 @@ static bool parseTimezoneFromJson(const String &payload)
             char posixBuf[16];
             posixFromUtcOffset(utcOff.c_str(), posixBuf, sizeof(posixBuf));
             LOG_WARN("Auto-TZ: %s not in lookup, using offset %s -> %s", iana.c_str(), utcOff.c_str(), posixBuf);
-            strncpy(config.device.tzdef, posixBuf, sizeof(config.device.tzdef) - 1);
-            config.device.tzdef[sizeof(config.device.tzdef) - 1] = '\0';
+            copyTzDef(out, outLen, posixBuf);
             return true;
         }
     }
@@ -239,8 +254,7 @@ static bool parseTimezoneFromJson(const String &payload)
             if (offsetSec == 0)
                 strncpy(posixBuf, "UTC0", sizeof(posixBuf));
             LOG_WARN("Auto-TZ: using numeric offset %d -> %s", offsetSec, posixBuf);
-            strncpy(config.device.tzdef, posixBuf, sizeof(config.device.tzdef) - 1);
-            config.device.tzdef[sizeof(config.device.tzdef) - 1] = '\0';
+            copyTzDef(out, outLen, posixBuf);
             return true;
         }
     }
@@ -249,31 +263,16 @@ static bool parseTimezoneFromJson(const String &payload)
     return false;
 }
 
-static void autoDetectTimezone()
+static void autoDetectTimezoneTask(void *)
 {
-    if (tzAutoDetected || !WiFi.isConnected())
-        return;
+    char detected[sizeof(config.device.tzdef)] = {};
+    bool success = false;
 
-    // Skip if user already has a real timezone configured (set via phone/menu)
-    // "GMT0" and "UTC0" are boot fallbacks, not deliberate user choices — still auto-detect
-    bool isDefault = (config.device.tzdef[0] == 0) ||
-                     (strcmp(config.device.tzdef, "GMT0") == 0) ||
-                     (strcmp(config.device.tzdef, "UTC0") == 0);
-    if (!isDefault) {
-        LOG_INFO("Auto-TZ: skipped, tzdef already set to %s", config.device.tzdef);
-        tzAutoDetected = true;
-        return;
-    }
-
-    LOG_INFO("Auto-TZ: attempting detection (try %d/%d)", tzRetryCount + 1, TZ_MAX_RETRIES);
-
-    // Try primary API, then fallback
     const char *apis[] = {
         "http://worldtimeapi.org/api/ip",
         "http://ip-api.com/json/?fields=status,timezone,offset"
     };
 
-    bool success = false;
     for (int i = 0; i < 2 && !success; i++) {
         HTTPClient http;
         http.setConnectTimeout(4000);
@@ -284,30 +283,85 @@ static void autoDetectTimezone()
         if (httpCode == 200) {
             String payload = http.getString();
             LOG_DEBUG("Auto-TZ API %d response: %s", i, payload.c_str());
-            success = parseTimezoneFromJson(payload);
+            success = parseTimezoneFromJson(payload, detected, sizeof(detected));
         } else {
             LOG_WARN("Auto-TZ API %d failed: %d", i, httpCode);
         }
         http.end();
     }
 
-    if (success) {
-        setenv("TZ", config.device.tzdef, 1);
-        tzset();
-        // Verify localtime() works with the new TZ
-        time_t now;
-        time(&now);
-        struct tm local;
-        localtime_r(&now, &local);
-        LOG_INFO("Timezone set to %s (localtime: %02d:%02d:%02d)", config.device.tzdef, local.tm_hour, local.tm_min, local.tm_sec);
+    if (success)
+        copyTzDef(tzDetectedDef, sizeof(tzDetectedDef), detected);
+    tzResultSuccess = success;
+    tzResultReady = true;
+    tzDetectInFlight = false;
+    vTaskDelete(nullptr);
+}
+
+// Returns true while a worker is in flight, so reconnectWiFi can poll soon.
+static bool autoDetectTimezone()
+{
+    if (tzAutoDetected || !WiFi.isConnected())
+        return false;
+
+    if (tzResultReady) {
+        tzResultReady = false;
+        if (tzResultSuccess) {
+            copyTzDef(config.device.tzdef, sizeof(config.device.tzdef), tzDetectedDef);
+            setenv("TZ", config.device.tzdef, 1);
+            tzset();
+
+            time_t now;
+            time(&now);
+            struct tm local;
+            localtime_r(&now, &local);
+            LOG_INFO("Timezone set to %s (localtime: %02d:%02d:%02d)", config.device.tzdef, local.tm_hour, local.tm_min,
+                     local.tm_sec);
+            tzAutoDetected = true;
+
+            // Persist on the main loop. The HTTP worker never touches NodeDB.
+            if (nodeDB) nodeDB->saveToDisk(SEGMENT_CONFIG);
+        } else {
+            tzRetryCount++;
+            if (tzRetryCount >= TZ_MAX_RETRIES) {
+                LOG_WARN("Auto-TZ: giving up after %d retries", TZ_MAX_RETRIES);
+                tzAutoDetected = true;
+            }
+        }
+        return false;
+    }
+
+    if (tzDetectInFlight)
+        return true;
+
+    // Skip if user already has a real timezone configured (set via phone/menu)
+    // "GMT0" and "UTC0" are boot fallbacks, not deliberate user choices — still auto-detect
+    bool isDefault = (config.device.tzdef[0] == 0) ||
+                     (strcmp(config.device.tzdef, "GMT0") == 0) ||
+                     (strcmp(config.device.tzdef, "UTC0") == 0);
+    if (!isDefault) {
+        LOG_INFO("Auto-TZ: skipped, tzdef already set to %s", config.device.tzdef);
         tzAutoDetected = true;
-    } else {
+        return false;
+    }
+
+    LOG_INFO("Auto-TZ: attempting detection (try %d/%d)", tzRetryCount + 1, TZ_MAX_RETRIES);
+
+    tzDetectInFlight = true;
+    tzResultReady = false;
+    tzResultSuccess = false;
+    BaseType_t ok = xTaskCreate(autoDetectTimezoneTask, "AutoTZ", 6144, nullptr, 1, nullptr);
+    if (ok != pdPASS) {
+        LOG_WARN("Auto-TZ: failed to start worker task");
+        tzDetectInFlight = false;
         tzRetryCount++;
         if (tzRetryCount >= TZ_MAX_RETRIES) {
             LOG_WARN("Auto-TZ: giving up after %d retries", TZ_MAX_RETRIES);
             tzAutoDetected = true;
         }
+        return false;
     }
+    return true;
 }
 #endif // !MESHTASTIC_EXCLUDE_TZ && ARCH_ESP32
 
@@ -453,7 +507,22 @@ static int32_t reconnectWiFi()
     }
 
 #ifndef DISABLE_NTP
-    if (WiFi.isConnected() && (!Throttle::isWithinTimespanMs(lastrun_ntp, 43200000) || (lastrun_ntp == 0))) { // every 12 hours
+    // NTP re-sync policy:
+    //  - Default Meshtastic behaviour is to re-sync every 12 hours while
+    //    WiFi is connected.
+    //  - With mcui's on-board PCF8563 RTC we only need to sync ONCE — the
+    //    chip holds the time across reboots, so subsequent boots restore
+    //    time from the chip without touching the internet. Once the chip
+    //    has been written (mcclock_save fired below on the first successful
+    //    sync) we skip all further NTP requests in this boot.
+    bool skip_ntp = false;
+#if HAS_TFT && USE_MCUI
+    if (mcui::mcclock_has_rtc() && mcui::mcclock_has_valid_time()) {
+        skip_ntp = true;
+    }
+#endif
+    if (!skip_ntp && WiFi.isConnected() &&
+        (!Throttle::isWithinTimespanMs(lastrun_ntp, 43200000) || (lastrun_ntp == 0))) { // every 12 hours
         LOG_DEBUG("Update NTP time from %s", config.network.ntp_server);
         if (timeClient.update()) {
             LOG_DEBUG("NTP Request Success - Setting RTCQualityNTP if needed");
@@ -464,16 +533,23 @@ static int32_t reconnectWiFi()
 
             perhapsSetRTC(RTCQualityNTP, &tv);
             lastrun_ntp = millis();
+
+#if HAS_TFT && USE_MCUI
+            // Persist to the PCF8563 so next boot restores from the chip
+            // without needing WiFi / NTP at all.
+            mcui::mcclock_save((uint32_t)tv.tv_sec);
+#endif
         } else {
             LOG_DEBUG("NTP Update failed");
         }
     }
 #endif
 
+    bool tz_pending = false;
 #if !MESHTASTIC_EXCLUDE_TZ && defined(ARCH_ESP32)
     // Auto-detect timezone from IP geolocation (runs independently, retries on failure)
     if (WiFi.isConnected())
-        autoDetectTimezone();
+        tz_pending = autoDetectTimezone();
 #endif
 
     if (config.network.wifi_enabled && !WiFi.isConnected()) {
@@ -485,7 +561,7 @@ static int32_t reconnectWiFi()
 #ifdef ARCH_RP2040
         onNetworkConnected(); // will only do anything once
 #endif
-        return 300000; // every 5 minutes
+        return tz_pending ? 1000 : 300000; // every 5 minutes, or poll the Auto-TZ worker
     }
 }
 

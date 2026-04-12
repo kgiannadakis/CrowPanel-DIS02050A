@@ -61,11 +61,16 @@ def manifest_gather(source, target, env):
     board_mcu = env.BoardConfig().get("build.mcu").lower()
     needs_ota_suffix = board_platform == "nordicnrf52"
     
-    # Mapping of bin files to their target partition names
-    # Maps the filename pattern to the partition name where it should be flashed
+    # Mapping of bin files to their target partition names.
+    # CrowPanel dual-boot builds override these so the web flasher writes
+    # Meshtastic to ota_1 and its filesystem to mtdata instead of the stock
+    # app0/spiffs layout.
+    app_partition = env.GetProjectOption("custom_meshtastic_app_partition", "app0")
+    fs_partition = env.GetProjectOption("custom_meshtastic_fs_partition", "spiffs")
+    uses_default_full_image = app_partition in ("app0", "factory")
     partition_map = {
-        f"{progname}.bin": "app0",              # primary application slot (app0 / OTA_0)
-        lfsbin: "spiffs",                        # filesystem image flashed to spiffs
+        f"{progname}.bin": app_partition,
+        lfsbin: fs_partition,
     }
     
     check_paths = [
@@ -82,6 +87,14 @@ def manifest_gather(source, target, env):
         f"mt-{board_mcu}-ota.bin",
         "bleota-c3.bin"
     ]
+    if not uses_default_full_image:
+        # A merged factory image contains padding over every partition between
+        # bootloader and app. For dual-boot builds that would wipe the factory
+        # selector/MeshCore slots, so only advertise partition-targeted files.
+        check_paths = [
+            p for p in check_paths
+            if p not in (f"{progname}.factory.bin", f"{progname}.factory.uf2")
+        ]
     for p in check_paths:
         f = env.File(env.subst(f"$BUILD_DIR/{p}"))
         if f.exists():

@@ -92,6 +92,14 @@ class NextHopRouter : public FloodingRouter
     // The number of retransmissions the original sender will do
     constexpr static uint8_t NUM_RELIABLE_RETX = 3;
 
+    /**
+     * Public query: is this packet still in the retransmission table, i.e. still
+     * awaiting an ACK (or scheduled for another retry)?
+     *
+     * Used by the mcui layer to drive "sent" -> "acknowledged" bubble state.
+     */
+    bool isAwaitingAck(NodeNum from, PacketId id) { return findPendingPacket(GlobalPacketId(from, id)) != nullptr; }
+
   protected:
     /**
      * Pending retransmissions

@@ -413,7 +413,8 @@ void RadioLibInterface::completeSending()
         airTime->logAirtime(TX_LOG, xmitMsec);
 
         txGood++;
-        if (!isFromUs(p))
+        bool relayed = !isFromUs(p);
+        if (relayed)
             txRelay++;
         printPacket("Completed sending", p);
 

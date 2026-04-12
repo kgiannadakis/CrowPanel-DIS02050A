@@ -22,14 +22,14 @@
 
 // GPS via UART1 connector
 #define GPS_DEFAULT_NOT_PRESENT 1
-#define HAS_GPS 1
 #if CROW_SELECT == 1
+#define HAS_GPS 1
 #define GPS_RX_PIN 18
 #define GPS_TX_PIN 17
 #else
-// GPIOs shared with LoRa or MIC module
-#define GPS_RX_PIN 19
-#define GPS_TX_PIN 20
+// Large panels route GPIO19/GPIO20 to SX1262 reset/DIO1. Do not expose GPS
+// here; a stale config that enables Serial1 on these pins breaks LoRa RX/TX.
+#define HAS_GPS 0
 #endif
 
 // Extension Slot Layout, viewed from above (2.4-3.5)
@@ -87,8 +87,60 @@
 #define SX126X_BUSY LORA_DIO2
 #define SX126X_RESET LORA_RESET
 #define SX126X_DIO2_AS_RF_SWITCH
-#define SX126X_DIO3_TCXO_VOLTAGE 3.3
+// TCXO reference voltage delivered on SX1262 DIO3 to power the external
+// TCXO part sitting next to the radio. Set to 1.8 V to match the Semtech
+// SX1262 reference design default, which is what virtually every other
+// Heltec / Ebyte / T-Beam / RAK variant in this tree uses. This file
+// previously specified 3.3 V which is the topmost bin of the SX1262's
+// discrete DIO3 voltage selector (1.6, 1.7, 1.8, 2.2, 2.4, 2.7, 3.0,
+// 3.3 V) — empirically swapping 3.3 -> 1.8 had no measurable effect on
+// the reported noise floor on this specific board, so treat the 1.8 V
+// choice as "match the reference design" rather than as a proven
+// sensitivity fix.
+#define SX126X_DIO3_TCXO_VOLTAGE 1.8
 
-// Force max TX power for SX1262 (22 dBm)
-#define SX126X_MAX_POWER 22
-#define DEFAULT_LORA_TX_POWER 22
+// CrowPanel PA path supports the high-power SX1262 setting.
+#define SX126X_MAX_POWER 27
+#define DEFAULT_LORA_TX_POWER 20
+
+#if CROW_SELECT != 1
+// CrowPanel RF experiment switches. Override these from PlatformIO build_flags
+// for A/B firmware without hand-editing the radio driver.
+#ifndef SX126X_REGISTER_PATCH_0X8B5
+#define SX126X_REGISTER_PATCH_0X8B5 1
+#endif
+#ifndef SX126X_FORCE_CONTINUOUS_RX
+#define SX126X_FORCE_CONTINUOUS_RX 0
+#endif
+#ifndef SX126X_AGC_RESET_INTERVAL_MS
+#define SX126X_AGC_RESET_INTERVAL_MS (5 * 60 * 1000)
+#endif
+#endif
+
+// Build-time pin conflict guards. These are intentionally blunt: on the large
+// RGB panels the LoRa IRQ/reset pins are easy to steal with stale GPS-style
+// assumptions, and that produces "deaf radio" symptoms instead of obvious
+// compile errors.
+#if HAS_GPS && defined(GPS_RX_PIN) && \
+    ((GPS_RX_PIN == LORA_CS) || (GPS_RX_PIN == LORA_SCK) || (GPS_RX_PIN == LORA_MISO) || \
+     (GPS_RX_PIN == LORA_MOSI) || (GPS_RX_PIN == LORA_RESET) || (GPS_RX_PIN == LORA_DIO1) || \
+     (GPS_RX_PIN == LORA_DIO2))
+#error "CrowPanel GPS_RX_PIN conflicts with LoRa pins"
+#endif
+
+#if HAS_GPS && defined(GPS_TX_PIN) && \
+    ((GPS_TX_PIN == LORA_CS) || (GPS_TX_PIN == LORA_SCK) || (GPS_TX_PIN == LORA_MISO) || \
+     (GPS_TX_PIN == LORA_MOSI) || (GPS_TX_PIN == LORA_RESET) || (GPS_TX_PIN == LORA_DIO1) || \
+     (GPS_TX_PIN == LORA_DIO2))
+#error "CrowPanel GPS_TX_PIN conflicts with LoRa pins"
+#endif
+
+#if defined(SDCARD_CS) && ((SDCARD_CS == LORA_CS) || (SDCARD_CS == LORA_RESET) || \
+                          (SDCARD_CS == LORA_DIO1) || (SDCARD_CS == LORA_DIO2))
+#error "CrowPanel SDCARD_CS conflicts with LoRa control pins"
+#endif
+
+#if ((I2C_SDA == LORA_RESET) || (I2C_SDA == LORA_DIO1) || (I2C_SDA == LORA_DIO2) || \
+     (I2C_SCL == LORA_RESET) || (I2C_SCL == LORA_DIO1) || (I2C_SCL == LORA_DIO2))
+#error "CrowPanel I2C pins conflict with LoRa IRQ/reset/busy pins"
+#endif

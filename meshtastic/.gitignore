@@ -4,6 +4,9 @@ pio.tar
 web
 web.tar
 
+# Local assistant/tool settings
+.claude/settings.local.json
+
 # ignore vscode IDE settings files
 .vscode/*
 !.vscode/settings.json

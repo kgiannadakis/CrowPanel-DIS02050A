@@ -62,4 +62,7 @@
 #define HAS_BLUETOOTH 1
 #define HAS_WIFI      1
 
+// Default to 20 dBm; higher power remains a deliberate manual setting.
+#define DEFAULT_LORA_TX_POWER 20
+
 #endif // _VARIANT_CROWPANEL_DIS05020A_V11_

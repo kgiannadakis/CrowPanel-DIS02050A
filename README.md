@@ -39,13 +39,21 @@
 
 ## Screenshots
 
+### Boot Selector & MeshCore
+
 | Boot Selector | Chat List | Chat & Keyboard |
 |:---:|:---:|:---:|
 | <img src="docs/images/bootscreen.jpg" width="180"> | <img src="docs/images/chats.jpg" width="180"> | <img src="docs/images/chat.jpg" width="180"> |
 
-| Settings (top) | Settings (bottom) |
-|:---:|:---:|
-| <img src="docs/images/settings1.jpg" width="180"> | <img src="docs/images/settings2.jpg" width="180"> |
+| MeshCore Settings (top) | MeshCore Settings (bottom) | Bootloader with OTA |
+|:---:|:---:|:---:|
+| <img src="docs/images/settings1.jpg" width="180"> | <img src="docs/images/settings2.jpg" width="180"> | <img src="docs/images/bootloader-ota.jpg" width="180"> |
+
+### Meshtastic
+
+| Home Screen | Settings (top) | Settings (bottom) | GPS Location |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/images/meshtastic-homescreen.jpg" width="160"> | <img src="docs/images/meshtastic-settings-1.jpg" width="160"> | <img src="docs/images/meshtastic-settings-2.jpg" width="160"> | <img src="docs/images/gps-location.png" width="160"> |
 
 ---
 

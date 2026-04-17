@@ -172,9 +172,9 @@ lv_obj_t *keyboard_create(lv_obj_t *parent)
     // We use a plain lv_buttonmatrix instead of lv_keyboard so we control the
     // layout and theme completely. lv_keyboard wraps buttonmatrix anyway.
     s_kb = lv_buttonmatrix_create(parent);
-    lv_obj_set_size(s_kb, SCR_W, KB_H);
+    lv_obj_set_size(s_kb, SCR_W, keyboard_height());
     // Flush with the bottom edge — covers the tab bar while visible.
-    lv_obj_set_pos(s_kb, 0, SCR_H - KB_H);
+    lv_obj_set_pos(s_kb, 0, SCR_H - keyboard_height());
     // Initial map + per-button width control array
     apply_map(s_kb, KB_LC);
 

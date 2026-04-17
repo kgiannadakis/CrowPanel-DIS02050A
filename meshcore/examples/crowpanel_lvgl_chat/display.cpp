@@ -472,7 +472,7 @@ void init_display_and_ui() {
   {
     lv_obj_t* green_btns[] = {
       ui_fadvertbutton, ui_zeroadvertbutton, ui_presetpickbutton,
-      ui_purgedatabutton, ui_notificationstoggle,
+      ui_notificationstoggle,
       ui_repeatersbutton, ui_autocontacttoggle, ui_autorepeatertoggle,
       ui_repeateradvertbutton, ui_neighboursbutton, ui_rebootbutton,
       ui_repeaterloginbutton, ui_mutebutton, ui_statusbutton
@@ -481,6 +481,10 @@ void init_display_and_ui() {
       if (btn) lv_obj_set_style_bg_color(btn, lv_color_hex(g_theme->btn_active),
                                          LV_PART_MAIN | LV_STATE_DEFAULT);
     }
+  }
+  if (ui_purgedatabutton) {
+    lv_obj_set_style_bg_color(ui_purgedatabutton, lv_color_hex(g_theme->btn_danger),
+                              LV_PART_MAIN | LV_STATE_DEFAULT);
   }
   if (ui_Label9) {
     lv_label_set_text(ui_Label9, LV_SYMBOL_UPLOAD "\nFlood-Advert");

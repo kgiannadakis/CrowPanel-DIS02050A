@@ -10,6 +10,11 @@
 #include "mesh/Channels.h"
 #include "mesh/NodeDB.h"
 #include "mesh/generated/meshtastic/channel.pb.h"
+#include "mesh/wifi/WiFiAPClient.h"
+
+#if HAS_WIFI && !defined(ARCH_PORTDUINO)
+#include <WiFi.h>
+#endif
 
 #include <cstdio>
 #include <cstring>
@@ -30,24 +35,6 @@ static lv_obj_t *make_page(lv_obj_t *parent)
     lv_obj_set_style_pad_all(p, 0, 0);
     lv_obj_remove_flag(p, LV_OBJ_FLAG_SCROLLABLE);
     return p;
-}
-
-static lv_obj_t *add_placeholder(lv_obj_t *page, const char *title, const char *hint)
-{
-    lv_obj_t *t = lv_label_create(page);
-    lv_label_set_text(t, title);
-    lv_obj_set_style_text_color(t, lv_color_hex(TH_TEXT), 0);
-    lv_obj_set_style_text_font(t, &lv_font_montserrat_16, 0);
-    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 20);
-
-    lv_obj_t *h = lv_label_create(page);
-    lv_label_set_text(h, hint);
-    lv_obj_set_style_text_color(h, lv_color_hex(TH_TEXT3), 0);
-    lv_obj_set_width(h, SCR_W - 40);
-    lv_label_set_long_mode(h, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(h, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(h, LV_ALIGN_CENTER, 0, 0);
-    return page;
 }
 
 // ============================================================================
@@ -430,11 +417,183 @@ void chats_screen_tick()
 
 // nodes_screen_create() lives in McNodes.cpp
 
+static lv_obj_t *s_maps_page = nullptr;
+static lv_obj_t *s_maps_advert_switch = nullptr;
+static lv_obj_t *s_maps_advert_note = nullptr;
+static lv_obj_t *s_maps_intro = nullptr;
+static lv_obj_t *s_maps_http = nullptr;
+static lv_obj_t *s_maps_https = nullptr;
+static lv_obj_t *s_maps_note = nullptr;
+static uint32_t s_maps_last_refresh_ms = 0;
+
+static bool maps_get_wifi_ip(char *out, size_t out_sz)
+{
+    if (!out || out_sz == 0)
+        return false;
+
+    out[0] = '\0';
+
+#if HAS_WIFI && !defined(ARCH_PORTDUINO)
+    if (WiFi.status() == WL_CONNECTED) {
+        IPAddress ip = WiFi.localIP();
+        if ((uint32_t)ip != 0) {
+            snprintf(out, out_sz, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+            return true;
+        }
+    }
+#endif
+
+    return false;
+}
+
+static lv_obj_t *add_maps_switch_row(lv_obj_t *parent, const char *label, bool initial, lv_event_cb_t cb)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_width(row, lv_pct(100));
+    lv_obj_set_height(row, 44);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *lbl = lv_label_create(row);
+    lv_label_set_text(lbl, label);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(TH_TEXT2), 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+    lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t *sw = lv_switch_create(row);
+    lv_obj_set_size(sw, 56, 28);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+    if (initial)
+        lv_obj_add_state(sw, LV_STATE_CHECKED);
+    if (cb)
+        lv_obj_add_event_cb(sw, cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    return sw;
+}
+
+static void maps_update_advert_note()
+{
+    if (!s_maps_advert_note)
+        return;
+
+    if (position_advert_enabled()) {
+        lv_label_set_text(s_maps_advert_note, "GPS or fixed position will be advertised to the mesh.");
+    } else {
+        lv_label_set_text(s_maps_advert_note, "Node info adverts continue, but position packets are not sent.");
+    }
+}
+
+static void maps_position_advert_changed_cb(lv_event_t *e)
+{
+    lv_obj_t *sw = (lv_obj_t *)lv_event_get_current_target(e);
+    bool enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    if (!position_advert_save(enabled)) {
+        if (enabled)
+            lv_obj_clear_state(sw, LV_STATE_CHECKED);
+        else
+            lv_obj_add_state(sw, LV_STATE_CHECKED);
+        return;
+    }
+    maps_update_advert_note();
+}
+
+static void maps_refresh(bool force = false)
+{
+    if (!s_maps_page || !s_maps_intro || !s_maps_http || !s_maps_https || !s_maps_note)
+        return;
+
+    uint32_t now = millis();
+    if (!force && (uint32_t)(now - s_maps_last_refresh_ms) < 1000)
+        return;
+    s_maps_last_refresh_ms = now;
+
+    char ip[24];
+    char http_url[64];
+    char https_url[64];
+
+    if (maps_get_wifi_ip(ip, sizeof(ip))) {
+        snprintf(http_url, sizeof(http_url), "HTTP:  http://%s/position", ip);
+        snprintf(https_url, sizeof(https_url), "HTTPS: https://%s/position", ip);
+        lv_label_set_text(s_maps_intro, "Open this address on your phone to set the device position:");
+        lv_label_set_text(s_maps_http, http_url);
+        lv_label_set_text(s_maps_https, https_url);
+        lv_label_set_text(s_maps_note, "If Chrome blocks phone location on HTTP, use the HTTPS address instead.");
+    } else {
+        lv_label_set_text(s_maps_intro, "Connect this device to WiFi to show the phone position page address.");
+        lv_label_set_text(s_maps_http, "HTTP:  unavailable");
+        lv_label_set_text(s_maps_https, "HTTPS: unavailable");
+        lv_label_set_text(s_maps_note, "Once connected, open the shown /position address on your phone.");
+    }
+}
+
 lv_obj_t *maps_screen_create(lv_obj_t *parent)
 {
-    lv_obj_t *p = make_page(parent);
-    add_placeholder(p, "Maps", "Work in progress, mostly expected in the P4 release");
-    return p;
+    s_maps_page = make_page(parent);
+
+    lv_obj_t *title = lv_label_create(s_maps_page);
+    lv_label_set_text(title, "Maps");
+    lv_obj_set_style_text_color(title, lv_color_hex(TH_TEXT), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
+
+    lv_obj_t *card = lv_obj_create(s_maps_page);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, SCR_W - 40, landscape_active() ? 320 : 380);
+    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 64);
+    lv_obj_set_style_bg_color(card, lv_color_hex(TH_SURFACE), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, 14, 0);
+    lv_obj_set_style_pad_all(card, 16, 0);
+    lv_obj_set_style_pad_row(card, 14, 0);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+
+    s_maps_advert_switch = add_maps_switch_row(card, "Advertise position", position_advert_enabled(),
+                                               maps_position_advert_changed_cb);
+
+    s_maps_advert_note = lv_label_create(card);
+    lv_obj_set_width(s_maps_advert_note, lv_pct(100));
+    lv_label_set_long_mode(s_maps_advert_note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(s_maps_advert_note, lv_color_hex(TH_TEXT3), 0);
+    lv_obj_set_style_text_align(s_maps_advert_note, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_maps_advert_note, &lv_font_montserrat_16, 0);
+
+    s_maps_intro = lv_label_create(card);
+    lv_obj_set_width(s_maps_intro, lv_pct(100));
+    lv_label_set_long_mode(s_maps_intro, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(s_maps_intro, lv_color_hex(TH_TEXT2), 0);
+    lv_obj_set_style_text_align(s_maps_intro, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_maps_intro, &lv_font_montserrat_16, 0);
+
+    s_maps_http = lv_label_create(card);
+    lv_obj_set_width(s_maps_http, lv_pct(100));
+    lv_label_set_long_mode(s_maps_http, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(s_maps_http, lv_color_hex(TH_ACCENT), 0);
+    lv_obj_set_style_text_align(s_maps_http, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_maps_http, &lv_font_montserrat_16, 0);
+
+    s_maps_https = lv_label_create(card);
+    lv_obj_set_width(s_maps_https, lv_pct(100));
+    lv_label_set_long_mode(s_maps_https, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(s_maps_https, lv_color_hex(TH_TAB_ACTIVE), 0);
+    lv_obj_set_style_text_align(s_maps_https, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_maps_https, &lv_font_montserrat_16, 0);
+
+    s_maps_note = lv_label_create(card);
+    lv_obj_set_width(s_maps_note, lv_pct(100));
+    lv_label_set_long_mode(s_maps_note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(s_maps_note, lv_color_hex(TH_TEXT3), 0);
+    lv_obj_set_style_text_align(s_maps_note, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_maps_note, &lv_font_montserrat_16, 0);
+
+    s_maps_last_refresh_ms = 0;
+    maps_update_advert_note();
+    maps_refresh(true);
+    return s_maps_page;
+}
+
+void maps_screen_tick()
+{
+    maps_refresh();
 }
 
 // settings_screen_create() lives in McSettings.cpp

@@ -65,6 +65,7 @@ static const uint32_t MIN_HEAP_FOR_SSL = 40000;
 static SSLCert *cert;
 static HTTPSServer *secureServer;
 static HTTPServer *insecureServer;
+static uint32_t lastWebServerInitAttempt = 0;
 
 volatile bool isWebServerReady;
 volatile bool isCertReady;
@@ -75,7 +76,7 @@ static void handleWebResponse()
 
         if (isWebServerReady) {
             // Check heap before HTTPS processing - SSL requires significant memory
-            if (secureServer) {
+            if (secureServer && secureServer->isRunning()) {
                 uint32_t freeHeap = ESP.getFreeHeap();
                 if (freeHeap >= MIN_HEAP_FOR_SSL) {
                     secureServer->loop();
@@ -88,8 +89,23 @@ static void handleWebResponse()
                     }
                 }
             }
-            insecureServer->loop();
+            if (insecureServer && insecureServer->isRunning()) {
+                insecureServer->loop();
+            }
         }
+    }
+}
+
+static void destroyWebServers()
+{
+    isWebServerReady = false;
+    if (secureServer) {
+        delete secureServer;
+        secureServer = nullptr;
+    }
+    if (insecureServer) {
+        delete insecureServer;
+        insecureServer = nullptr;
     }
 }
 
@@ -234,6 +250,13 @@ int32_t WebServerThread::runOnce()
         disable();
     }
 
+    if (isWifiAvailable() && !isWebServerReady) {
+        if (lastWebServerInitAttempt == 0 || !Throttle::isWithinTimespanMs(lastWebServerInitAttempt, 5000)) {
+            LOG_INFO("Retrying web server startup");
+            initWebServer();
+        }
+    }
+
     handleWebResponse();
 
     if (requestRestart && (millis() / 1000) > requestRestart) {
@@ -245,25 +268,56 @@ int32_t WebServerThread::runOnce()
 
 void initWebServer()
 {
+    if (!isWifiAvailable()) {
+        LOG_WARN("Skip web server init because networking is not available");
+        return;
+    }
+
+    lastWebServerInitAttempt = millis();
+    if (insecureServer && insecureServer->isRunning()) {
+        isWebServerReady = true;
+        return;
+    }
+
+    destroyWebServers();
     LOG_DEBUG("Init Web Server");
 
-    // We can now use the new certificate to setup our server as usual.
-    secureServer = new HTTPSServer(cert, 443, MAX_HTTPS_CONNECTIONS);
     insecureServer = new HTTPServer();
+    bool enableHttps = (cert != nullptr);
+    if (enableHttps) {
+        secureServer = new HTTPSServer(cert, 443, MAX_HTTPS_CONNECTIONS);
+    }
 
     registerHandlers(insecureServer, secureServer);
 
-    if (secureServer) {
-        LOG_INFO("Start Secure Web Server");
-        secureServer->start();
-    }
     LOG_INFO("Start Insecure Web Server");
-    insecureServer->start();
-    if (insecureServer->isRunning()) {
-        LOG_INFO("Web Servers Ready! :-) ");
+    bool insecureStarted = insecureServer && insecureServer->start();
+    if (insecureStarted && insecureServer->isRunning()) {
+        LOG_INFO("Insecure Web Server ready on port 80");
         isWebServerReady = true;
     } else {
-        LOG_ERROR("Web Servers Failed! ;-( ");
+        LOG_ERROR("Insecure Web Server failed to start");
+    }
+
+    if (secureServer) {
+        if (ESP.getFreeHeap() >= MIN_HEAP_FOR_SSL) {
+            LOG_INFO("Start Secure Web Server");
+            if (secureServer->start()) {
+                LOG_INFO("Secure Web Server ready on port 443");
+            } else {
+                LOG_WARN("Secure Web Server failed to start");
+                delete secureServer;
+                secureServer = nullptr;
+            }
+        } else {
+            LOG_WARN("Skipping HTTPS startup due to low heap (%u bytes)", ESP.getFreeHeap());
+            delete secureServer;
+            secureServer = nullptr;
+        }
+    }
+
+    if (!isWebServerReady) {
+        destroyWebServers();
     }
 }
 #endif

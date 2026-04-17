@@ -16,6 +16,7 @@
 #include "configuration.h"
 
 #include <Arduino.h>
+#include <Preferences.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <lvgl.h>
@@ -27,6 +28,89 @@ static lv_obj_t *s_root = nullptr;
 static lv_obj_t *s_page_host = nullptr;
 static lv_obj_t *s_pages[4] = {nullptr, nullptr, nullptr, nullptr};
 static int s_active_tab = -1;
+static bool s_landscape = false;
+static bool s_position_advert = true;
+static bool s_prefs_loaded = false;
+
+static constexpr const char *MCUI_PREF_NS = "meshtastic";
+static constexpr const char *MCUI_PREF_KEY_LANDSCAPE = "mcuiLandscape";
+static constexpr const char *MCUI_PREF_KEY_POSITION_ADVERT = "mcuiPosAdvert";
+
+static void prefs_load_once()
+{
+    if (s_prefs_loaded)
+        return;
+
+    Preferences prefs;
+    if (prefs.begin(MCUI_PREF_NS, true)) {
+        s_landscape = prefs.getBool(MCUI_PREF_KEY_LANDSCAPE, false);
+        s_position_advert = prefs.getBool(MCUI_PREF_KEY_POSITION_ADVERT, true);
+        prefs.end();
+    }
+    s_prefs_loaded = true;
+}
+
+int screen_width()
+{
+    return s_landscape ? LANDSCAPE_SCR_W : PORTRAIT_SCR_W;
+}
+
+int screen_height()
+{
+    return s_landscape ? LANDSCAPE_SCR_H : PORTRAIT_SCR_H;
+}
+
+int page_height()
+{
+    return screen_height() - STATUS_H - TAB_H;
+}
+
+int keyboard_height()
+{
+    return s_landscape ? 180 : 280;
+}
+
+bool landscape_active()
+{
+    prefs_load_once();
+    return s_landscape;
+}
+
+bool orientation_save(bool landscape)
+{
+    prefs_load_once();
+    Preferences prefs;
+    if (!prefs.begin(MCUI_PREF_NS, false)) {
+        LOG_ERROR("mcui: failed to open preferences for orientation save");
+        return false;
+    }
+    bool ok = prefs.putBool(MCUI_PREF_KEY_LANDSCAPE, landscape);
+    prefs.end();
+    if (ok)
+        s_landscape = landscape;
+    return ok;
+}
+
+bool position_advert_enabled()
+{
+    prefs_load_once();
+    return s_position_advert;
+}
+
+bool position_advert_save(bool enabled)
+{
+    prefs_load_once();
+    Preferences prefs;
+    if (!prefs.begin(MCUI_PREF_NS, false)) {
+        LOG_ERROR("mcui: failed to open preferences for position advert save");
+        return false;
+    }
+    bool ok = prefs.putBool(MCUI_PREF_KEY_POSITION_ADVERT, enabled);
+    prefs.end();
+    if (ok)
+        s_position_advert = enabled;
+    return ok;
+}
 
 void switchTab(int idx)
 {
@@ -130,6 +214,8 @@ static void ui_task(void *)
                 chatview_tick();
             if (s_active_tab == TAB_NODES)
                 nodes_screen_tick();
+            else if (s_active_tab == TAB_MAPS)
+                maps_screen_tick();
             else if (s_active_tab == TAB_SETTINGS)
                 settings_screen_tick();
         }
@@ -149,6 +235,7 @@ static void ui_task(void *)
 void setup()
 {
     if (s_task) return;
+    prefs_load_once();
 
     // Restore wall-clock time from the PCF8563 RTC at I2C 0x51 BEFORE we
     // spawn the UI task and BEFORE the mesh router / modules start getting

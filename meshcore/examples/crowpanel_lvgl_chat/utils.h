@@ -13,6 +13,7 @@ bool utf8_valid_seq(const uint8_t* p, int len);
 // Text sanitization
 void sanitize_ascii_inplace(char* s);
 String sanitize_ascii_string(const char* s);
+String sanitize_for_font_string(const char* s, const lv_font_t* font);
 
 // Time
 void mesh_set_time_epoch(uint32_t epoch);
@@ -53,7 +54,7 @@ void serialmon_append(const char* line);
 void serialmon_append_color(uint32_t rgb, const char* line);
 
 // Deferred message push
-void deferred_msg_push(bool out, const char* txt, const char* sig = "");
+void deferred_msg_push(bool out, const char* txt, const char* sig = "", bool live_status = false, uint32_t msg_ts = 0);
 
 // I2C helpers
 bool i2c_ok(uint8_t a);

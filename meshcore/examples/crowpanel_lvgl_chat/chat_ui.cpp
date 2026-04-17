@@ -51,6 +51,7 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
   int sep = s.indexOf(": ");
   String name = (sep > 0) ? s.substring(0, sep + 1) : (out ? String("Me:") : String(""));
   String body = (sep > 0) ? s.substring(sep + 2) : s;
+  String safeBody = sanitize_for_font_string(body.c_str(), &lv_font_montserrat_16);
 
   lv_obj_t* bubble = lv_obj_create(ui_chatpanel);
   int bubble_pct = g_landscape_mode ? 65 : 82;
@@ -74,7 +75,7 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
     lv_obj_set_style_translate_x(bubble, lv_pct(shift_pct), 0);
   }
 
-  String safeName = name;
+  String safeName = sanitize_for_font_string(name.c_str(), &lv_font_montserrat_14);
   safeName.replace("#", "");
   String safeTs = ts;
   safeTs.replace("#", "");
@@ -82,7 +83,7 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
   // Build signal info string for header (hops + SNR, shown next to sender)
   String safeSig = "";
   if (!out && signal_info && signal_info[0]) {
-    safeSig = sanitize_ascii_string(signal_info);
+    safeSig = sanitize_for_font_string(signal_info, &lv_font_montserrat_14);
     safeSig.replace("#", "");
   }
 
@@ -122,7 +123,7 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
 
   lv_obj_t* lbl = lv_label_create(bubble);
   lv_label_set_recolor(lbl, false);
-  lv_label_set_text(lbl, body.c_str());
+  lv_label_set_text(lbl, safeBody.c_str());
   lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(lbl, lv_pct(100));
   lv_obj_set_style_text_color(lbl, lv_color_hex(g_theme->bubble_text), 0);
@@ -138,7 +139,7 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
       g_pending_status_label = nullptr;
     }
     lblStatus = lv_label_create(bubble);
-    lv_label_set_text(lblStatus, LV_SYMBOL_REFRESH " sending...");
+    lv_label_set_text(lblStatus, "Sending");
     lv_obj_set_style_text_color(lblStatus, lv_color_hex(g_theme->bubble_text), 0);
     lv_obj_set_style_text_opa(lblStatus, LV_OPA_50, 0);
     lv_obj_set_style_text_font(lblStatus, &lv_font_montserrat_12, 0);
@@ -150,8 +151,11 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
     if (loaded_status == 'D') {
       lv_label_set_text(lblStatus, LV_SYMBOL_OK " delivered");
       lv_obj_set_style_text_color(lblStatus, lv_color_hex(g_theme->status_delivered), 0);
+    } else if (loaded_status == 'U') {
+      lv_label_set_text(lblStatus, LV_SYMBOL_WARNING " Unknown, acknowledge will fail in 1'");
+      lv_obj_set_style_text_color(lblStatus, lv_color_hex(g_theme->status_pending), 0);
     } else if (loaded_status == 'N') {
-      lv_label_set_text(lblStatus, LV_SYMBOL_CLOSE " no reply");
+      lv_label_set_text(lblStatus, "Failed");
       lv_obj_set_style_text_color(lblStatus, lv_color_hex(g_theme->status_failed), 0);
     } else if (loaded_status == 'R') {
       if (loaded_repeat_count == 0) {
@@ -180,9 +184,10 @@ lv_obj_t* chat_add(bool out, const char* txt, bool live, char loaded_status, con
 
   // Show inline translation if provided (from file history or auto-translate)
   if (translation && translation[0]) {
+    String safeTranslation = sanitize_for_font_string(translation, &lv_font_montserrat_12);
     lv_obj_t* trans_lbl = lv_label_create(bubble);
     lv_label_set_long_mode(trans_lbl, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(trans_lbl, translation);
+    lv_label_set_text(trans_lbl, safeTranslation.c_str());
     lv_obj_set_width(trans_lbl, lv_pct(100));
     lv_obj_set_style_text_color(trans_lbl, lv_color_hex(TH_TEXT3), 0);
     lv_obj_set_style_text_font(trans_lbl, &lv_font_montserrat_12, 0);
@@ -205,8 +210,11 @@ void apply_status_to_label(lv_obj_t* lbl, char sc) {
   } else if (sc == 'R') {
     lv_label_set_text(lbl, LV_SYMBOL_OK " Sent");
     lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+  } else if (sc == 'U') {
+    lv_label_set_text(lbl, LV_SYMBOL_WARNING " Unknown, acknowledge will fail in 1'");
+    lv_obj_set_style_text_color(lbl, lv_color_hex(g_theme->status_pending), 0);
   } else if (sc == 'N') {
-    lv_label_set_text(lbl, LV_SYMBOL_CLOSE " no reply");
+    lv_label_set_text(lbl, "Failed");
     lv_obj_set_style_text_color(lbl, lv_color_hex(g_theme->status_failed), 0);
   } else {
     lv_label_set_text(lbl, LV_SYMBOL_WARNING " unconfirmed");
@@ -234,7 +242,7 @@ void apply_receipt_count_to_label(lv_obj_t* lbl, uint16_t count, int8_t snr_raw)
 struct ResendData {
   uint8_t pub_key[32];
   char    text[241];
-  lv_obj_t* status_label;  // to update back to "sending..."
+  lv_obj_t* status_label;  // to restore the pending PM label while retrying
 };
 
 static void cb_resend_btn_delete(lv_event_t* e) {
@@ -247,15 +255,11 @@ static void cb_resend_pressed(lv_event_t* e) {
   ResendData* rd = (ResendData*)lv_event_get_user_data(e);
   if (!rd) return;
 
-  // Update status label
-  if (rd->status_label) {
-    lv_label_set_text(rd->status_label, LV_SYMBOL_REFRESH " resending...");
-    lv_obj_set_style_text_color(rd->status_label, lv_color_hex(g_theme->status_pending), 0);
-  }
-
-  // Send the message again
-  mesh_send_text_to_contact(rd->pub_key, rd->text);
-  serialmon_append("Resend triggered");
+  // Re-transmit using the same ring slot / bubble / file entry. The slot's
+  // ui_dirty flag flows through the main-loop label updater to set the
+  // correct "Sending" text automatically — no manual label mutation needed.
+  bool ok = mesh_resend_pm_by_bubble_label(rd->status_label);
+  serialmon_append(ok ? "Resend triggered" : "Resend failed: no matching slot");
 
   // Remove the resend button (this triggers cb_resend_btn_delete → frees rd)
   lv_obj_t* btn = lv_event_get_target(e);

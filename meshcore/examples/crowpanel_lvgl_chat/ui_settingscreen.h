@@ -17,6 +17,8 @@ extern lv_obj_t * ui_zeroadvertbutton;
 extern lv_obj_t * ui_Label8;
 extern lv_obj_t * ui_fadvertbutton;
 extern lv_obj_t * ui_Label9;
+extern lv_obj_t * ui_positionadverttoggle;
+extern lv_obj_t * ui_positionadvert_lbl;
 extern lv_obj_t * ui_Label10;
 extern lv_obj_t * ui_autocontacttoggle;
 extern lv_obj_t * ui_Label11;

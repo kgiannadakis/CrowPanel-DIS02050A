@@ -2,6 +2,7 @@
 
 #include "McChatView.h"
 #include "../McKeyboard.h"
+#include "../McStatusBar.h"
 #include "../McTheme.h"
 #include "../McUI.h"
 #include "../data/McMessages.h"
@@ -27,13 +28,15 @@ static constexpr int HEADER_H = 44;
 // textarea isn't visually "sitting inside" the keyboard top edge.
 static constexpr int INPUT_ROW_H = 56;
 static constexpr int KB_GAP = 8;
-static constexpr int CHAT_Y = STATUS_H;
-static constexpr int CHAT_H = PAGE_H; // area of chat view container
+static int chat_top_y() { return landscape_active() ? 0 : STATUS_H; }
+static int chat_h() { return landscape_active() ? (SCR_H - TAB_H) : PAGE_H; }
+static bool merged_landscape_header() { return landscape_active(); }
 
 static lv_obj_t *s_root = nullptr;        // full-page container
 static lv_obj_t *s_header = nullptr;
 static lv_obj_t *s_title = nullptr;
 static lv_obj_t *s_back_btn = nullptr;
+static lv_obj_t *s_time = nullptr;
 static lv_obj_t *s_bubbles = nullptr;     // scrollable bubble container
 static lv_obj_t *s_input_row = nullptr;
 static lv_obj_t *s_textarea = nullptr;
@@ -49,6 +52,21 @@ static int16_t s_press_start_x = -1;
 static constexpr int16_t EDGE_SWIPE_MARGIN = 40;
 
 static void rebuild_bubbles();
+static void refresh_header_time();
+static void update_header_layout();
+
+static void update_chat_frame()
+{
+    if (!s_root || !s_header || !s_bubbles)
+        return;
+
+    lv_obj_set_size(s_root, SCR_W, chat_h());
+    lv_obj_set_pos(s_root, 0, chat_top_y());
+    lv_obj_set_size(s_header, SCR_W, HEADER_H);
+    lv_obj_set_width(s_bubbles, SCR_W);
+    if (s_input_row)
+        lv_obj_set_width(s_input_row, SCR_W);
+}
 
 // Recompute input row + bubble container geometry based on keyboard state.
 // When the keyboard is visible, the input row sits directly above it and the
@@ -59,15 +77,15 @@ static void layout_for_keyboard(bool kb_visible)
 
     int input_y_screen;
     if (kb_visible) {
-        // Keyboard occupies [SCR_H - KB_H, SCR_H]. Input sits just above it
+        // Keyboard occupies [SCR_H - keyboard_height(), SCR_H]. Input sits just above it
         // with a small visible gap so they don't touch — otherwise the
         // textarea looks like it's clipped into the keyboard's top edge.
-        input_y_screen = SCR_H - KB_H - INPUT_ROW_H - KB_GAP;
+        input_y_screen = SCR_H - keyboard_height() - INPUT_ROW_H - KB_GAP;
     } else {
         // No keyboard: input sits just above the tab bar.
         input_y_screen = SCR_H - TAB_H - INPUT_ROW_H;
     }
-    int input_y_local = input_y_screen - CHAT_Y;
+    int input_y_local = input_y_screen - chat_top_y();
     lv_obj_set_pos(s_input_row, 0, input_y_local);
 
     // Bubbles fill the area between header and input row.
@@ -80,6 +98,44 @@ static void layout_for_keyboard(bool kb_visible)
 static void back_cb(lv_event_t *)
 {
     chatview_hide();
+}
+
+static void refresh_header_time()
+{
+    if (!s_time)
+        return;
+
+    if (!merged_landscape_header()) {
+        lv_obj_add_flag(s_time, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    char buf[8] = "--:--";
+    time_t now = time(nullptr);
+    if (now >= 1700000000) {
+        struct tm lt;
+        localtime_r(&now, &lt);
+        snprintf(buf, sizeof(buf), "%02d:%02d", lt.tm_hour, lt.tm_min);
+    }
+    lv_label_set_text(s_time, buf);
+    lv_obj_remove_flag(s_time, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void update_header_layout()
+{
+    if (!s_header || !s_back_btn || !s_title || !s_time)
+        return;
+
+    if (merged_landscape_header()) {
+        lv_obj_align(s_back_btn, LV_ALIGN_LEFT_MID, 12, 0);
+        lv_obj_align(s_title, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_align(s_time, LV_ALIGN_RIGHT_MID, -12, 0);
+        lv_obj_remove_flag(s_time, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_align(s_back_btn, LV_ALIGN_LEFT_MID, 12, 0);
+        lv_obj_align(s_title, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_add_flag(s_time, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 // Captures the x coordinate of a press-start inside the chat view so the
@@ -299,8 +355,8 @@ lv_obj_t *chatview_create(lv_obj_t *parent)
     // Parented to the root screen so we can place the input row above the
     // keyboard (which covers the tab bar while visible). We cover the whole
     // area between the status bar and the tab bar.
-    lv_obj_set_size(s_root, SCR_W, CHAT_H);
-    lv_obj_set_pos(s_root, 0, CHAT_Y);
+    lv_obj_set_size(s_root, SCR_W, chat_h());
+    lv_obj_set_pos(s_root, 0, chat_top_y());
     lv_obj_set_style_bg_color(s_root, lv_color_hex(TH_BG), 0);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
     lv_obj_remove_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
@@ -336,6 +392,11 @@ lv_obj_t *chatview_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(s_title, lv_color_hex(TH_TEXT), 0);
     lv_obj_align(s_title, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(s_title, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    s_time = lv_label_create(s_header);
+    lv_label_set_text(s_time, "--:--");
+    lv_obj_set_style_text_color(s_time, lv_color_hex(TH_TEXT2), 0);
+    lv_obj_add_flag(s_time, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     // Dismiss-keyboard / swipe-back press handler on the header. Events on
     // the back button and title bubble up here via LV_OBJ_FLAG_EVENT_BUBBLE
@@ -420,6 +481,10 @@ lv_obj_t *chatview_create(lv_obj_t *parent)
     lv_obj_set_style_text_font(sl, &lv_font_montserrat_16, 0);
     lv_obj_center(sl);
 
+    update_chat_frame();
+    update_header_layout();
+    refresh_header_time();
+
     // Initial layout (no keyboard)
     layout_for_keyboard(false);
 
@@ -432,6 +497,10 @@ void chatview_open(const McConvId &id, const char *title)
     s_current = id;
     lv_label_set_text(s_title, title ? title : "");
     lv_textarea_set_text(s_textarea, "");
+    statusbar_set_visible(!merged_landscape_header());
+    update_chat_frame();
+    update_header_layout();
+    refresh_header_time();
     rebuild_bubbles();
     messages_mark_read(id);
     s_last_tick = messages_change_tick();
@@ -453,6 +522,9 @@ void chatview_hide()
 {
     if (!s_root) return;
     keyboard_hide();
+    statusbar_set_visible(true);
+    update_chat_frame();
+    update_header_layout();
     layout_for_keyboard(false);
     lv_obj_add_flag(s_root, LV_OBJ_FLAG_HIDDEN);
     s_current = McConvId::none();
@@ -466,6 +538,7 @@ bool chatview_is_open()
 void chatview_tick()
 {
     if (!chatview_is_open()) return;
+    refresh_header_time();
     uint32_t t = messages_change_tick();
     if (t != s_last_tick) {
         s_last_tick = t;

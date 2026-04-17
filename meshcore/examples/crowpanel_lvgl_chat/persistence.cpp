@@ -397,6 +397,7 @@ void save_ui_prefs_nvs() {
   g_prefs.putUChar("auto_contact",  g_auto_contact_enabled  ? 1 : 0);
   g_prefs.putUChar("auto_repeater", g_auto_repeater_enabled ? 1 : 0);
   g_prefs.putUChar("pkt_fwd",      g_packet_forward_enabled ? 1 : 0);
+  g_prefs.putUChar("pos_adv",      g_position_advert_enabled ? 1 : 0);
   g_prefs.putUChar("auto_trans",   g_auto_translate_enabled ? 1 : 0);
   g_prefs.putUChar("trans_lang",   (uint8_t)g_translate_lang_idx);
   g_prefs.putUInt("muted_ch",     g_muted_channel_mask);
@@ -422,6 +423,7 @@ void load_ui_prefs_nvs() {
   g_auto_contact_enabled  = g_prefs.getUChar("auto_contact",  1) != 0;
   g_auto_repeater_enabled  = g_prefs.getUChar("auto_repeater", 1) != 0;
   g_packet_forward_enabled = g_prefs.getUChar("pkt_fwd",      1) != 0;
+  g_position_advert_enabled = g_prefs.getUChar("pos_adv",     1) != 0;
   g_auto_translate_enabled = g_prefs.getUChar("auto_trans",   0) != 0;
   g_translate_lang_idx     = (int)g_prefs.getUChar("trans_lang", 0);
   if (g_translate_lang_idx >= translate_lang_count()) g_translate_lang_idx = 0;

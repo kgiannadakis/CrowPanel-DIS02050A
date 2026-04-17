@@ -51,11 +51,13 @@ void wake_on_event() {
 }
 
 // ---- Deferred message push ----
-void deferred_msg_push(bool out, const char* txt, const char* sig) {
+void deferred_msg_push(bool out, const char* txt, const char* sig, bool live_status, uint32_t msg_ts) {
   static const int DEFERRED_MSG_MAX = 32;
   if (g_deferred_msg_count >= DEFERRED_MSG_MAX) { g_deferred_msg_dropped++; return; }
   DeferredChatMsg& m = g_deferred_msgs[g_deferred_msg_count++];
   m.out = out;
+  m.live_status = live_status;
+  m.msg_ts = msg_ts;
   strncpy(m.txt, txt ? txt : "", sizeof(m.txt) - 1); m.txt[sizeof(m.txt)-1] = '\0';
   strncpy(m.sig, sig ? sig : "", sizeof(m.sig) - 1); m.sig[sizeof(m.sig)-1] = '\0';
 }
@@ -107,6 +109,28 @@ bool utf8_valid_seq(const uint8_t* p, int len) {
   return true;
 }
 
+static uint32_t utf8_decode_seq(const uint8_t* p, int len) {
+  switch (len) {
+    case 1: return p[0];
+    case 2: return ((uint32_t)(p[0] & 0x1F) << 6) |
+                   ((uint32_t)(p[1] & 0x3F));
+    case 3: return ((uint32_t)(p[0] & 0x0F) << 12) |
+                   ((uint32_t)(p[1] & 0x3F) << 6) |
+                   ((uint32_t)(p[2] & 0x3F));
+    case 4: return ((uint32_t)(p[0] & 0x07) << 18) |
+                   ((uint32_t)(p[1] & 0x3F) << 12) |
+                   ((uint32_t)(p[2] & 0x3F) << 6) |
+                   ((uint32_t)(p[3] & 0x3F));
+    default: return 0;
+  }
+}
+
+static bool font_has_glyph(const lv_font_t* font, uint32_t codepoint) {
+  if (!font || codepoint == 0) return false;
+  lv_font_glyph_dsc_t dsc;
+  return lv_font_get_glyph_dsc(font, &dsc, codepoint, 0);
+}
+
 // ---- Text sanitization ----
 void sanitize_ascii_inplace(char* s) {
   if (!s) return;
@@ -151,6 +175,53 @@ String sanitize_ascii_string(const char* s) {
       }
     }
     r++;
+  }
+  return out;
+}
+
+String sanitize_for_font_string(const char* s, const lv_font_t* font) {
+  if (!s) return "";
+  if (!font) return sanitize_ascii_string(s);
+
+  String out;
+  out.reserve(strlen(s));
+  const uint8_t* r = (const uint8_t*)s;
+  while (*r) {
+    uint8_t c = *r;
+    if (c == '\n' || c == '\t') {
+      out += (char)c;
+      r++;
+      continue;
+    }
+    if (c >= 32 && c < 0x80) {
+      out += (char)c;
+      r++;
+      continue;
+    }
+
+    int slen = utf8_seq_len(c);
+    if (slen < 2 || slen > 4) {
+      r++;
+      continue;
+    }
+
+    bool ok = true;
+    for (int i = 0; i < slen; i++) {
+      if (!r[i]) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok || !utf8_valid_seq(r, slen)) {
+      r++;
+      continue;
+    }
+
+    uint32_t codepoint = utf8_decode_seq(r, slen);
+    if (font_has_glyph(font, codepoint)) {
+      for (int i = 0; i < slen; i++) out += (char)r[i];
+    }
+    r += slen;
   }
   return out;
 }

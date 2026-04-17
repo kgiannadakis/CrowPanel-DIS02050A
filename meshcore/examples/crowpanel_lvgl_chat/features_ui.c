@@ -213,6 +213,7 @@ void ui_featuresscreen_screen_init(void) {
     ui_wifistatuslabel = lv_label_create(form);
     lv_label_set_text(ui_wifistatuslabel, "");
     lv_obj_set_width(ui_wifistatuslabel, lv_pct(100));
+    lv_label_set_long_mode(ui_wifistatuslabel, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(ui_wifistatuslabel, lv_color_hex(TH_TEXT2), 0);
     lv_obj_set_style_text_font(ui_wifistatuslabel, &lv_font_montserrat_14, 0);
 
@@ -220,7 +221,7 @@ void ui_featuresscreen_screen_init(void) {
     // TRANSLATION
     // ══════════════════════════════════════════════════════════
 
-    make_section_hdr(form, "TRANSLATION");
+    make_section_hdr(form, "TRANSLATION (available only when online)");
     {
         lv_obj_t* hint = lv_label_create(form);
         lv_label_set_text(hint, "Auto-translate or long-press a message");
@@ -239,15 +240,6 @@ void ui_featuresscreen_screen_init(void) {
     // ══════════════════════════════════════════════════════════
     // WEB DASHBOARD
     // ══════════════════════════════════════════════════════════
-
-    make_section_hdr(form, "WEB DASHBOARD");
-
-    ui_wd_toggle = make_action_btn(form, &ui_wd_toggle_lbl, lv_pct(100), 44);
-
-    ui_wd_status_lbl = lv_label_create(form);
-    lv_label_set_text(ui_wd_status_lbl, "Disabled");
-    lv_obj_set_style_text_color(ui_wd_status_lbl, lv_color_hex(TH_TEXT3), 0);
-    lv_obj_set_style_text_font(ui_wd_status_lbl, &lv_font_montserrat_14, 0);
 
     // ══════════════════════════════════════════════════════════
     // TELEGRAM BRIDGE

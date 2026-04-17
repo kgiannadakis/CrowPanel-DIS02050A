@@ -328,7 +328,8 @@ static void show_translation_in_bubble(lv_obj_t* bubble, const char* translated)
     lv_obj_t* trans_lbl = lv_label_create(bubble);
     lv_obj_set_user_data(trans_lbl, (void*)(uintptr_t)TRANSLATE_LABEL_TAG);
     lv_label_set_long_mode(trans_lbl, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(trans_lbl, translated);
+    String safeTranslation = sanitize_for_font_string(translated, &lv_font_montserrat_14);
+    lv_label_set_text(trans_lbl, safeTranslation.c_str());
     lv_obj_set_width(trans_lbl, lv_pct(100));
     lv_obj_set_style_text_color(trans_lbl, lv_color_hex(TH_TEXT3), 0);
     lv_obj_set_style_text_font(trans_lbl, &lv_font_montserrat_14, 0);

@@ -14,6 +14,7 @@
 #include "wifi_ntp.h"
 
 #include <lvgl.h>
+#include <WiFi.h>
 
 // SquareLine UI widget externs
 #include "ui.h"
@@ -126,6 +127,27 @@ void cb_packet_forward_toggle(lv_event_t*) {
   ui_apply_packet_forward_state();
   serialmon_append(g_packet_forward_enabled ? "Packet forwarding: ON" : "Packet forwarding: OFF");
   save_ui_prefs_nvs();
+}
+
+// ---- Position advert toggle ----
+void ui_apply_position_advert_state() {
+  if (!ui_positionadverttoggle) return;
+  if (g_position_advert_enabled) lv_obj_add_state(ui_positionadverttoggle, LV_STATE_CHECKED);
+  else lv_obj_clear_state(ui_positionadverttoggle, LV_STATE_CHECKED);
+  if (ui_positionadvert_lbl) {
+    lv_label_set_text(ui_positionadvert_lbl, LV_SYMBOL_GPS " Include position in adverts");
+    lv_obj_set_style_text_color(ui_positionadvert_lbl,
+      g_position_advert_enabled ? lv_color_hex(TH_TEXT) : lv_color_hex(TH_TEXT3), 0);
+  }
+}
+void cb_position_advert_toggle(lv_event_t*) {
+  if (!ui_positionadverttoggle) return;
+  g_position_advert_enabled = lv_obj_has_state(ui_positionadverttoggle, LV_STATE_CHECKED);
+  ui_apply_position_advert_state();
+  save_ui_prefs_nvs();
+  serialmon_append(g_position_advert_enabled
+    ? "Position in node advert: ON"
+    : "Position in node advert: OFF");
 }
 
 // ---- Auto-translate toggle ----
@@ -469,22 +491,65 @@ void cb_textsend_focused(lv_event_t*) {
 
 static lv_coord_t s_settings_form_orig_h = 0;
 
+static lv_obj_t* settings_find_scroll_form(lv_obj_t* field) {
+  if (!field) return nullptr;
+  lv_obj_t* obj = field;
+  while (obj) {
+    lv_obj_t* parent = lv_obj_get_parent(obj);
+    if (!parent) break;
+    if (lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE)) return parent;
+    obj = parent;
+  }
+  return lv_obj_get_parent(field);
+}
+
+static lv_obj_t* settings_field_anchor(lv_obj_t* field, lv_obj_t* form) {
+  if (!field || !form) return field;
+  lv_obj_t* anchor = field;
+  lv_obj_t* parent = lv_obj_get_parent(anchor);
+  while (parent && parent != form) {
+    anchor = parent;
+    parent = lv_obj_get_parent(anchor);
+  }
+  return anchor;
+}
+
+static void settings_scroll_above_keyboard(lv_obj_t* field, lv_obj_t* form) {
+  if (!field || !form || !ui_Keyboard2) return;
+
+  lv_obj_t* anchor = settings_field_anchor(field, form);
+  if (anchor) lv_obj_scroll_to_view(anchor, LV_ANIM_OFF);
+
+  lv_obj_update_layout(lv_scr_act());
+
+  lv_area_t kb_area;
+  lv_area_t anchor_area;
+  lv_obj_get_coords(ui_Keyboard2, &kb_area);
+  lv_obj_get_coords(anchor ? anchor : field, &anchor_area);
+
+  static const lv_coord_t CLEARANCE = 20;
+  lv_coord_t overlap = (anchor_area.y2 + CLEARANCE) - kb_area.y1;
+  if (overlap > 0) {
+    lv_obj_scroll_by(form, 0, overlap, LV_ANIM_OFF);
+  }
+}
+
 void settings_field_focus(lv_obj_t* field) {
   if (!field || !ui_Keyboard2) return;
   kb_show(ui_Keyboard2, field);
-  lv_obj_t* form = lv_obj_get_parent(field);
+  lv_obj_t* form = settings_find_scroll_form(field);
   if (!form) return;
   if (s_settings_form_orig_h == 0) s_settings_form_orig_h = lv_obj_get_height(form);
   lv_coord_t form_y = lv_obj_get_y(form);
   lv_coord_t kb_top = SETTINGS_KB_TOP;
   lv_coord_t new_h = kb_top - form_y;
   if (new_h > 100) lv_obj_set_height(form, new_h);
-  lv_obj_scroll_to_view(field, LV_ANIM_ON);
+  settings_scroll_above_keyboard(field, form);
 }
 void settings_field_defocus(lv_obj_t* field) {
   kb_hide(ui_Keyboard2, field);
   if (!field) return;
-  lv_obj_t* form = lv_obj_get_parent(field);
+  lv_obj_t* form = settings_find_scroll_form(field);
   if (form && s_settings_form_orig_h > 0) {
     lv_obj_set_height(form, s_settings_form_orig_h);
     s_settings_form_orig_h = 0;
@@ -654,11 +719,33 @@ void ui_populate_presets() {
 static lv_timer_t* s_wifi_scan_timer = nullptr;
 
 void ui_apply_wifi_state() {
-  if (ui_wifitoggle) {
-    lv_obj_set_style_bg_color(ui_wifitoggle,
-      g_wifi_enabled ? lv_color_hex(g_theme->btn_active) : lv_color_hex(g_theme->btn_danger), 0);
-    if (ui_wifitoggle_lbl)
-      lv_label_set_text(ui_wifitoggle_lbl, g_wifi_enabled ? LV_SYMBOL_WIFI "\nWiFi ON\nHigh battery usage" : LV_SYMBOL_WIFI "\nWiFi OFF");
+  if (!ui_wifitoggle) return;
+  lv_obj_set_style_bg_color(ui_wifitoggle,
+    g_wifi_enabled ? lv_color_hex(g_theme->btn_active) : lv_color_hex(g_theme->btn_danger), 0);
+  if (!ui_wifitoggle_lbl) return;
+
+  // Full WiFi status is rendered inside the toggle button itself — the
+  // separate ui_wifistatuslabel is kept empty/hidden by wifi_ui_update_status.
+  // Use LVGL label recolor so the "Connected to: SSID" line can be green.
+  lv_label_set_recolor(ui_wifitoggle_lbl, true);
+
+  if (!g_wifi_enabled) {
+    lv_label_set_text(ui_wifitoggle_lbl, LV_SYMBOL_WIFI "  WiFi OFF");
+  } else if (g_wifi_connected) {
+    char buf[224];
+    snprintf(buf, sizeof(buf),
+             LV_SYMBOL_WIFI "  WiFi ON\n#6DC264 Connected to: %s#\nVisit: %s for GPS and Dashboard",
+             g_wifi_ssid,
+             WiFi.localIP().toString().c_str());
+    lv_label_set_text(ui_wifitoggle_lbl, buf);
+  } else if (g_wifi_has_saved_network) {
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+             LV_SYMBOL_WIFI "  WiFi ON\nSaved: %s (not connected)",
+             g_wifi_ssid);
+    lv_label_set_text(ui_wifitoggle_lbl, buf);
+  } else {
+    lv_label_set_text(ui_wifitoggle_lbl, LV_SYMBOL_WIFI "  WiFi ON\nNo network configured");
   }
 }
 
@@ -669,23 +756,13 @@ static void wifi_show_network_ui(bool show) {
 }
 
 void wifi_ui_update_status() {
-  if (!ui_wifistatuslabel) return;
-  if (!g_wifi_enabled) {
-    lv_label_set_text(ui_wifistatuslabel, "WiFi disabled");
-    lv_obj_set_style_text_color(ui_wifistatuslabel, lv_color_hex(0xAAAAAA), 0);
-  } else if (g_wifi_connected) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Connected: %s", g_wifi_ssid);
-    lv_label_set_text(ui_wifistatuslabel, buf);
-    lv_obj_set_style_text_color(ui_wifistatuslabel, lv_color_hex(0x00DD00), 0);
-  } else if (g_wifi_has_saved_network) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Saved: %s (not connected)", g_wifi_ssid);
-    lv_label_set_text(ui_wifistatuslabel, buf);
-    lv_obj_set_style_text_color(ui_wifistatuslabel, lv_color_hex(0xFF4444), 0);
-  } else {
-    lv_label_set_text(ui_wifistatuslabel, "No network configured");
-    lv_obj_set_style_text_color(ui_wifistatuslabel, lv_color_hex(0xAAAAAA), 0);
+  // Status text now lives inside the WiFi toggle button itself.
+  ui_apply_wifi_state();
+
+  // Keep the separate label empty/hidden (historical artefact).
+  if (ui_wifistatuslabel) {
+    lv_label_set_text(ui_wifistatuslabel, "");
+    lv_obj_add_flag(ui_wifistatuslabel, LV_OBJ_FLAG_HIDDEN);
   }
 
   // Show/hide forget button

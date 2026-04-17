@@ -6,13 +6,24 @@
 
 namespace mcui {
 
-// Logical portrait dimensions
-constexpr int SCR_W = 480;
-constexpr int SCR_H = 800;
+// Logical screen dimensions depend on the persisted mcui orientation.
+constexpr int PORTRAIT_SCR_W = 480;
+constexpr int PORTRAIT_SCR_H = 800;
+constexpr int LANDSCAPE_SCR_W = 800;
+constexpr int LANDSCAPE_SCR_H = 480;
 constexpr int STATUS_H = 40;
 constexpr int TAB_H = 60;
 constexpr int PAGE_Y = STATUS_H;
-constexpr int PAGE_H = SCR_H - STATUS_H - TAB_H;
+
+int screen_width();
+int screen_height();
+int page_height();
+int keyboard_height();
+
+bool landscape_active();
+bool orientation_save(bool landscape);
+bool position_advert_enabled();
+bool position_advert_save(bool enabled);
 
 enum Tab {
     TAB_CHATS = 0,
@@ -28,5 +39,9 @@ void setup();
 void switchTab(int idx);
 
 } // namespace mcui
+
+#define SCR_W (::mcui::screen_width())
+#define SCR_H (::mcui::screen_height())
+#define PAGE_H (::mcui::page_height())
 
 #endif // HAS_TFT && USE_MCUI

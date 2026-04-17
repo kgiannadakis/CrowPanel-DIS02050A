@@ -12,6 +12,9 @@
 #include "PowerFSM.h"
 #include "RTC.h"
 #include "TypeConversions.h"
+#if HAS_TFT && USE_MCUI
+#include "graphics/mcui/McUI.h"
+#endif
 #include "graphics/draw/MessageRenderer.h"
 #include "main.h"
 #include "mesh-pb-constants.h"
@@ -277,10 +280,15 @@ void MeshService::sendToMesh(meshtastic_MeshPacket *p, RxSource src, bool ccToPh
 bool MeshService::trySendPosition(NodeNum dest, bool wantReplies)
 {
     meshtastic_NodeInfoLite *node = nodeDB->getMeshNode(nodeDB->getNodeNum());
+    bool allowPositionAdvert = true;
 
     assert(node);
 
-    if (nodeDB->hasValidPosition(node)) {
+#if HAS_TFT && USE_MCUI
+    allowPositionAdvert = mcui::position_advert_enabled();
+#endif
+
+    if (allowPositionAdvert && nodeDB->hasValidPosition(node)) {
 #if HAS_GPS && !MESHTASTIC_EXCLUDE_GPS
         if (positionModule) {
             if (!config.position.fixed_position && !nodeDB->hasLocalPositionSinceBoot()) {
@@ -293,6 +301,9 @@ bool MeshService::trySendPosition(NodeNum dest, bool wantReplies)
         }
     } else {
 #endif
+        if (!allowPositionAdvert && nodeDB->hasValidPosition(node)) {
+            LOG_INFO("Position advertising disabled, sending nodeinfo ping instead");
+        }
         if (nodeInfoModule) {
             LOG_INFO("Send nodeinfo ping to 0x%x, wantReplies=%d, channel=%d", dest, wantReplies, node->channel);
             nodeInfoModule->sendOurNodeInfo(dest, wantReplies, node->channel);

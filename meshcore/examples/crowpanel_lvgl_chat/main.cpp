@@ -138,6 +138,7 @@ bool g_notifications_enabled = true;
 bool g_auto_contact_enabled  = true;
 bool g_auto_repeater_enabled = true;
 bool g_packet_forward_enabled = true;
+bool g_position_advert_enabled = true;
 bool g_auto_translate_enabled = false;
 int  g_translate_lang_idx     = 0;
 bool g_manual_discover_active = false;
@@ -447,6 +448,11 @@ protected:
   float getAirtimeBudgetFactor() const override { return _prefs.airtime_factor; }
   int calcRxDelay(float, uint32_t) const override { return 0; }
   bool allowPacketForward(const mesh::Packet*) override { return g_packet_forward_enabled; }
+  // Send one extra ACK ~300ms after the primary when a direct path is known.
+  // Improves delivery-confirmation reliability on lossy return paths without
+  // materially impacting airtime. Flood ACKs aren't duplicated (the ACK is
+  // encoded in the path-return packet by BaseChatMesh).
+  uint8_t getExtraAckTransmitCount() const override { return 1; }
 
   void sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, uint32_t delay_millis = 0) override {
     uint8_t phs = _prefs.path_hash_mode + 1;
@@ -693,9 +699,14 @@ protected:
              time_string_now().c_str(), safeName.c_str(), safeText.c_str());
     append_chat_to_file(key_for_contact(contact.id), false, bubble, 0, sig.c_str());
 
+    char target_key[11];
+    snprintf(target_key, sizeof(target_key), "c:%02x%02x%02x%02x",
+             contact.id.pub_key[0], contact.id.pub_key[1],
+             contact.id.pub_key[2], contact.id.pub_key[3]);
+
     // Forward to bridges (incoming PM: sender=contact, recipient=me)
     tgbridge_forward_pm(safeName.c_str(), _prefs.node_name, safeText.c_str(), false);
-    webdash_broadcast_message(safeName.c_str(), safeText.c_str(), false);
+    webdash_broadcast_message(safeName.c_str(), safeText.c_str(), false, target_key);
 
     // Auto-translate incoming PM if enabled
     if (g_auto_translate_enabled && g_wifi_connected) {
@@ -744,11 +755,30 @@ protected:
     return nullptr;
   }
 
+  static void pm_fail_existing_pending(const char* reason) {
+    OutboundPM* prev = pm_find_pending();
+    if (!prev) return;
+    serialmon_append(reason ? reason : "TX PM: superseding previous pending message");
+    pm_slot_mark_failed(prev);
+    if (prev->status_label) {
+      apply_status_to_label(prev->status_label, 'N');
+      prev->ui_dirty = false;
+    }
+  }
+
   static OutboundPM* pm_find_by_ack(uint32_t ack) {
     for (int i = 0; i < PM_RING_SIZE; i++) {
       if (!g_pm_ring[i].active) continue;
       for (int j = 0; j < g_pm_ring[i].ack_count; j++)
         if (g_pm_ring[i].ack_codes[j] == ack) return &g_pm_ring[i];
+    }
+    return nullptr;
+  }
+
+  static OutboundPM* pm_find_by_msg_ts(uint32_t msg_ts) {
+    if (!msg_ts) return nullptr;
+    for (int i = 0; i < PM_RING_SIZE; i++) {
+      if (g_pm_ring[i].active && g_pm_ring[i].msg_ts == msg_ts) return &g_pm_ring[i];
     }
     return nullptr;
   }
@@ -782,6 +812,19 @@ protected:
     slot->expiry_ms = millis() + PM_LATE_EXPIRY_MS;
   }
 
+  // After all retries exhausted without ACK: show "Probably delivered" for a
+  // window. A late ACK arriving during this window flips to delivered (green).
+  // If the window expires, checkPmUnconfirmedExpiry() transitions to 'N'.
+  static void pm_slot_mark_unconfirmed(OutboundPM* slot) {
+    if (!slot) return;
+    slot->state = 'U';
+    slot->ui_dirty = true;
+    slot->file_dirty = true;
+    slot->hard_timeout_ms = 0;
+    slot->retry_timeout_ms = 0;
+    slot->expiry_ms = millis() + PM_UNCONFIRMED_MS;
+  }
+
   static void pm_slot_mark_delivered(OutboundPM* slot) {
     if (!slot) return;
     slot->state = 'D';
@@ -796,12 +839,15 @@ protected:
     uint32_t now = millis();
     for (int i = 0; i < PM_RING_SIZE; i++) {
       OutboundPM& s = g_pm_ring[i];
-      if (s.active && s.state != 'P' && s.expiry_ms && (int32_t)(now - s.expiry_ms) > 0) {
+      // 'U' (unconfirmed) slots are handled separately by checkPmUnconfirmedExpiry,
+      // which transitions them to 'N' when the window expires (so the user can press Resend).
+      if (s.active && s.state != 'P' && s.state != 'U' && s.expiry_ms && (int32_t)(now - s.expiry_ms) > 0) {
         s.active = false;
         s.status_label = nullptr;
       }
     }
   }
+
 
   // pm_mark_failed now operates on the pending ring slot
   void pm_mark_current_failed() {
@@ -809,26 +855,49 @@ protected:
     if (slot) pm_slot_mark_failed(slot);
   }
 
-  static const uint8_t MAX_PM_RETRIES = 3;
-  static const uint8_t FLOOD_FALLBACK_RETRY = 2;  // retries 0,1 = use stored path; 2,3 = force flood
+  static const uint8_t PM_TOTAL_ATTEMPTS = 3;
+  static const uint8_t MAX_PM_RETRIES = PM_TOTAL_ATTEMPTS - 1;
+  static const uint8_t FLOOD_FALLBACK_RETRY = 2;  // retry 1 uses stored path; retry 2 forces flood
+  static const uint32_t PM_HARD_TIMEOUT_MS = 15000UL + 12000UL + 10000UL + 3000UL;
+
+  static uint32_t pm_timeout_for_attempt(uint8_t attempt_number) {
+    switch (attempt_number) {
+      case 1: return 15000UL;
+      case 2: return 12000UL;
+      default: return 10000UL;
+    }
+  }
+
+  static void pm_apply_sending_label(lv_obj_t* lbl, uint8_t attempt_number) {
+    if (!lbl) return;
+    if (attempt_number <= 1) {
+      lv_label_set_text(lbl, "Sending");
+    } else {
+      char buf[40];
+      snprintf(buf, sizeof(buf), "Sending (attempt %u/%u)",
+               (unsigned)attempt_number, (unsigned)PM_TOTAL_ATTEMPTS);
+      lv_label_set_text(lbl, buf);
+    }
+    lv_obj_set_style_text_color(lbl, lv_color_hex(g_theme->bubble_text), 0);
+    lv_obj_set_style_text_opa(lbl, LV_OPA_50, 0);
+  }
 
   // Core retry logic — shared by onSendTimeout (first timeout from base class)
   // and checkPmRetryTimeout (subsequent retries via our own timer).
   void doPmRetry(OutboundPM* slot) {
     if (slot->retry_count < MAX_PM_RETRIES && slot->recipient && slot->retry_text[0]) {
       slot->retry_count++;
+      uint8_t attempt_number = slot->retry_count + 1;
       bool force_flood = (slot->retry_count >= FLOOD_FALLBACK_RETRY);
       const char* via = force_flood ? "flood" : "stored path";
       char msg[96];
-      snprintf(msg, sizeof(msg), "TX timeout, retry %u/%u via %s (stored path=%u)",
-               slot->retry_count, MAX_PM_RETRIES, via, (unsigned)slot->recipient->out_path_len);
+      snprintf(msg, sizeof(msg), "TX timeout, attempt %u/%u via %s (stored path=%u)",
+               (unsigned)attempt_number, (unsigned)PM_TOTAL_ATTEMPTS,
+               via, (unsigned)slot->recipient->out_path_len);
       serialmon_append(msg);
 
       if (slot->status_label) {
-        char stxt[24];
-        snprintf(stxt, sizeof(stxt), LV_SYMBOL_REFRESH " retry %u",
-                 (unsigned)slot->retry_count);
-        lv_label_set_text(slot->status_label, stxt);
+        pm_apply_sending_label(slot->status_label, attempt_number);
       }
 
       uint32_t expected_ack = 0, est_timeout = 0;
@@ -843,18 +912,17 @@ protected:
       if (result != MSG_SEND_FAILED) {
         if (slot->ack_count < MAX_PM_ACK_CODES)
           slot->ack_codes[slot->ack_count++] = expected_ack;
-        // Schedule next retry via our own timer. sendMessage() also sets
-        // txt_send_timeout in base class, but base class loop() clears it
-        // to 0 after onSendTimeout() returns on the first call.
-        slot->retry_timeout_ms = millis() + est_timeout;
+        slot->retry_timeout_ms = millis() + pm_timeout_for_attempt(attempt_number);
         return;
       }
     }
-    // Final failure
+    // Retries exhausted: enter 'Probably delivered' state for PM_UNCONFIRMED_MS.
+    // A late ACK during this window flips to 'D' (delivered). Otherwise the
+    // slot transitions to 'N' (Failed) in checkPmUnconfirmedExpiry().
     if (slot->recipient) {
       char diag[128];
       snprintf(diag, sizeof(diag),
-               "PM FAILED: stored path=%u, sent=flood, acks_tracked=%d",
+               "PM retries exhausted: stored path=%u, acks_tracked=%d, awaiting late ACK",
                (unsigned)slot->recipient->out_path_len, (int)slot->ack_count);
       serialmon_append(diag);
 
@@ -862,7 +930,7 @@ protected:
         slot->recipient->out_path_len = OUT_PATH_UNKNOWN;
         g_contacts_save_dirty = true;
         g_contacts_save_ms = millis();
-        serialmon_append("Auto-reset path to flood after failure");
+        serialmon_append("Auto-reset path to flood after retries");
 
         if (g_in_chat_mode && _curr_recipient == slot->recipient) {
           g_chat_route_path_len = OUT_PATH_UNKNOWN;
@@ -870,9 +938,9 @@ protected:
         }
       }
     } else {
-      serialmon_append("PM FAILED: no recipient");
+      serialmon_append("PM retries exhausted: no recipient");
     }
-    pm_slot_mark_failed(slot);
+    pm_slot_mark_unconfirmed(slot);
   }
 
   void onSendTimeout() override {
@@ -928,7 +996,9 @@ protected:
         tgbridge_forward_channel(safeCh.c_str(), "?", safeText.c_str());
       }
     }
-    webdash_broadcast_message(safeCh.c_str(), safeText.c_str(), false);
+    char target_key[12];
+    snprintf(target_key, sizeof(target_key), "h:%d", idx);
+    webdash_broadcast_message(safeCh.c_str(), safeText.c_str(), false, target_key);
 
     // Auto-translate incoming channel message if enabled
     // Extract just the message body (strip "SenderName: ")
@@ -1193,6 +1263,12 @@ public:
   void setTxPowerPref(int8_t dbm) { _prefs.tx_power_dbm = dbm; savePrefs(); }
   double getNodeLat() const { return _prefs.node_lat; }
   double getNodeLon() const { return _prefs.node_lon; }
+  void setNodePosition(double lat, double lon) {
+    _prefs.node_lat = lat;
+    _prefs.node_lon = lon;
+    savePrefs();
+  }
+  void clearNodePosition() { setNodePosition(0.0, 0.0); }
 
   void renameIfNonEmpty(const char* new_name) {
     if (!new_name) return;
@@ -1223,7 +1299,9 @@ public:
 #if SERIALMON_VERBOSE
     serialmon_append("TX flood advert");
 #endif
-    auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
+    auto pkt = g_position_advert_enabled
+      ? createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon)
+      : createSelfAdvert(_prefs.node_name);
     if (pkt) sendFlood(pkt, delay_ms);
   }
 
@@ -1231,7 +1309,9 @@ public:
 #if SERIALMON_VERBOSE
     serialmon_append("TX 0-hop advert");
 #endif
-    auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
+    auto pkt = g_position_advert_enabled
+      ? createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon)
+      : createSelfAdvert(_prefs.node_name);
     if (pkt) sendZeroHop(pkt, delay_ms);
   }
 
@@ -1288,6 +1368,7 @@ public:
   bool sendTextToContactByPubKey(const uint8_t* pk, const char* text) {
     ContactInfo* c = lookupContactByPubKey(pk, 32);
     if (!c || !text || !text[0]) return false;
+    pm_fail_existing_pending("TX PM: superseding previous pending message");
     uint32_t ts = rtc_clock.getCurrentTimeUnique();
     uint32_t ack = 0, timeout = 0;
     bool ok = sendMessage(*c, ts, 0, text, ack, timeout) != MSG_SEND_FAILED;
@@ -1307,14 +1388,23 @@ public:
       strncpy(slot->chat_key, ck.c_str(), sizeof(slot->chat_key) - 1);
       slot->ack_codes[0] = ack;
       slot->ack_count = 1;
-      slot->hard_timeout_ms = millis() + 45000;
+      slot->retry_count = 0;
+      slot->hard_timeout_ms = millis() + PM_HARD_TIMEOUT_MS;
+      slot->retry_timeout_ms = millis() + pm_timeout_for_attempt(1);
       slot->recipient = c;
-      // No status_label (headless), no retry_text (no retries for bridge sends)
+      strncpy(slot->retry_text, text, sizeof(slot->retry_text) - 1);
+      slot->retry_text[sizeof(slot->retry_text) - 1] = '\0';
+      // No status_label for headless sends, but keep the same retry cadence.
+
+      char target_key[11];
+      snprintf(target_key, sizeof(target_key), "c:%02x%02x%02x%02x",
+               c->id.pub_key[0], c->id.pub_key[1], c->id.pub_key[2], c->id.pub_key[3]);
 
       if (g_in_chat_mode && _curr_kind == TargetKind::CONTACT && _curr_recipient &&
           memcmp(_curr_recipient->id.pub_key, pk, 32) == 0) {
-        deferred_msg_push(true, bubble, nullptr);
+        deferred_msg_push(true, bubble, nullptr, true, ts);
       }
+      webdash_broadcast_message(c->name, text, true, target_key);
     }
     return ok;
   }
@@ -1358,7 +1448,7 @@ public:
     if (slot->recipient) {
       char diag[128];
       snprintf(diag, sizeof(diag),
-               "PM FAILED (hard timeout): stored path=%u, acks_tracked=%d",
+               "PM hard timeout, awaiting late ACK: stored path=%u, acks_tracked=%d",
                (unsigned)slot->recipient->out_path_len, (int)slot->ack_count);
       serialmon_append(diag);
 
@@ -1366,7 +1456,7 @@ public:
         slot->recipient->out_path_len = OUT_PATH_UNKNOWN;
         g_contacts_save_dirty = true;
         g_contacts_save_ms = millis();
-        serialmon_append("Auto-reset path to flood after failure");
+        serialmon_append("Auto-reset path to flood after hard timeout");
 
         if (g_in_chat_mode && _curr_recipient == slot->recipient) {
           g_chat_route_path_len = OUT_PATH_UNKNOWN;
@@ -1374,11 +1464,102 @@ public:
         }
       }
     } else {
-      serialmon_append("PM hard timeout (30s) - clearing stuck state");
+      serialmon_append("PM hard timeout - clearing stuck state");
     }
-    pm_slot_mark_failed(slot);
+    pm_slot_mark_unconfirmed(slot);
     // Also evict expired entries
     pm_evict_expired();
+  }
+
+  // When a slot has been in 'U' (Probably delivered) for PM_UNCONFIRMED_MS
+  // without receiving a late ACK, transition it to 'N' (Failed). The main
+  // loop's existing resend-button gate (state == 'N') will then offer resend.
+  void checkPmUnconfirmedExpiry() {
+    uint32_t now = millis();
+    for (int i = 0; i < PM_RING_SIZE; i++) {
+      OutboundPM& s = g_pm_ring[i];
+      if (s.active && s.state == 'U' && s.expiry_ms && (int32_t)(now - s.expiry_ms) > 0) {
+        pm_slot_mark_failed(&s);
+      }
+    }
+  }
+
+  // Re-transmit an existing PM slot (used by the Resend button). Reuses the
+  // same bubble and file entry so the user sees ONE bubble with a refreshed
+  // "Sending" status — no duplicate bubble, no duplicate file line.
+  bool resendSlot(OutboundPM* slot) {
+    if (!slot || !slot->active || !slot->recipient || !slot->retry_text[0]) return false;
+    if (slot->state != 'N' && slot->state != 'U') return false;
+
+    // Reset slot to a fresh pending state, keep the same msg_ts so the file
+    // entry is updated in place (not duplicated).
+    slot->state = 'P';
+    slot->retry_count = 0;
+    slot->ack_count = 0;
+    slot->resend_offered = false;
+    // Don't set ui_dirty — apply_status_to_label doesn't render 'P' as "Sending".
+    // Instead we call pm_apply_sending_label directly below.
+    slot->ui_dirty = false;
+    slot->file_dirty = true;
+    slot->hard_timeout_ms = millis() + PM_HARD_TIMEOUT_MS;
+    slot->retry_timeout_ms = millis() + pm_timeout_for_attempt(1);
+    slot->expiry_ms = 0;
+
+    uint32_t expected_ack = 0, est_timeout = 0;
+    int result = sendMessage(*(slot->recipient), slot->msg_ts, 0, slot->retry_text, expected_ack, est_timeout);
+    if (result == MSG_SEND_FAILED) {
+      serialmon_append("Resend: sendMessage failed, marking slot unconfirmed");
+      pm_slot_mark_unconfirmed(slot);
+      return false;
+    }
+
+    slot->ack_codes[0] = expected_ack;
+    slot->ack_count = 1;
+
+    // Explicitly render "Sending" on the bubble's status label (same path as
+    // doPmRetry for attempt 2/3). The main loop's ring processor will then
+    // update to "Sending (attempt N/3)" on subsequent retries via doPmRetry,
+    // and flip to 'D'/'U'/'N' via ui_dirty once the outcome is known.
+    if (slot->status_label) {
+      pm_apply_sending_label(slot->status_label, 1);
+    }
+
+    char logbuf[96];
+    snprintf(logbuf, sizeof(logbuf), "Resend: retransmitted ts=%lu to %s",
+             (unsigned long)slot->msg_ts, slot->recipient->name);
+    serialmon_append(logbuf);
+    return true;
+  }
+
+  // Find a slot by its status_label and resend it (used by the chat UI button).
+  bool resendByStatusLabel(lv_obj_t* status_label) {
+    if (!status_label) return false;
+    for (int i = 0; i < PM_RING_SIZE; i++) {
+      OutboundPM& s = g_pm_ring[i];
+      if (s.active && s.status_label == status_label) {
+        return resendSlot(&s);
+      }
+    }
+    return false;
+  }
+
+  void bindPmStatusLabel(uint32_t msg_ts, lv_obj_t* status_label) {
+    if (!status_label) return;
+
+    OutboundPM* slot = pm_find_by_msg_ts(msg_ts);
+    if (!slot) {
+      serialmon_append("Deferred PM bubble: slot not found");
+      apply_status_to_label(status_label, 'N');
+      return;
+    }
+
+    slot->status_label = status_label;
+
+    if (slot->state == 'P') {
+      pm_apply_sending_label(status_label, slot->retry_count + 1);
+    } else {
+      apply_status_to_label(status_label, slot->state);
+    }
   }
 
   void stopRepeaterConnection(const uint8_t* pub_key) { stopConnection(pub_key); }
@@ -1555,17 +1736,7 @@ public:
     String tsStr = time_string_now();
 
     if (_curr_kind == TargetKind::CONTACT && _curr_recipient) {
-      // If another PM is pending, mark it failed immediately
-      OutboundPM* prev = pm_find_pending();
-      if (prev) {
-        serialmon_append("TX PM: superseding previous pending message");
-        pm_slot_mark_failed(prev);
-        // Apply failure to its label now (before chat_add marks it unconfirmed)
-        if (prev->status_label) {
-          apply_status_to_label(prev->status_label, 'N');
-          prev->ui_dirty = false;
-        }
-      }
+      pm_fail_existing_pending("TX PM: superseding previous pending message");
 
       uint32_t expected_ack = 0, est_timeout = 0;
       int result = sendMessage(*_curr_recipient, ts, 0, safeText.c_str(), expected_ack, est_timeout);
@@ -1593,19 +1764,26 @@ public:
         slot->ack_codes[0] = expected_ack;
         slot->ack_count = 1;
         slot->retry_count = 0;
-        slot->hard_timeout_ms = millis() + 45000;
+        slot->hard_timeout_ms = millis() + PM_HARD_TIMEOUT_MS;
+        slot->retry_timeout_ms = millis() + pm_timeout_for_attempt(1);
         slot->recipient = _curr_recipient;
         strncpy(slot->retry_text, safeText.c_str(), sizeof(slot->retry_text) - 1);
         slot->retry_text[sizeof(slot->retry_text) - 1] = '\0';
+
+        char target_key[11];
+        snprintf(target_key, sizeof(target_key), "c:%02x%02x%02x%02x",
+                 _curr_recipient->id.pub_key[0], _curr_recipient->id.pub_key[1],
+                 _curr_recipient->id.pub_key[2], _curr_recipient->id.pub_key[3]);
 
         char bubble[512];
         snprintf(bubble, sizeof(bubble), "[%s] Me: %s", tsStr.c_str(), safeText.c_str());
         append_chat_to_file(ck, true, bubble, ts);
         lv_obj_t* lbl = chat_add(true, bubble, true);
         slot->status_label = lbl;
+        pm_apply_sending_label(lbl, 1);
 
         tgbridge_forward_pm(_prefs.node_name, namebuf, safeText.c_str(), true);
-        webdash_broadcast_message(namebuf, safeText.c_str(), true);
+        webdash_broadcast_message(namebuf, safeText.c_str(), true, target_key);
       } else {
         serialmon_append("TX PM flood send failed");
       }
@@ -1635,7 +1813,9 @@ public:
         String key = key_for_channel(_curr_channel_idx);
         append_chat_to_file(key, true, bubble);
         tgbridge_forward_channel(chbuf, _prefs.node_name, safeText.c_str());
-        webdash_broadcast_message(chbuf, safeText.c_str(), true);
+        char target_key[12];
+        snprintf(target_key, sizeof(target_key), "h:%d", _curr_channel_idx);
+        webdash_broadcast_message(chbuf, safeText.c_str(), true, target_key);
 
         // Show pending status, then start live discovery to count nearby repeaters
         char sc = 'P';
@@ -1988,6 +2168,7 @@ void setup() {
   reg(ui_presetsdropdown,   cb_preset, LV_EVENT_VALUE_CHANGED);
   reg(ui_fadvertbutton,     cb_fadvert);
   reg(ui_zeroadvertbutton,  cb_zeroadvert);
+  reg(ui_positionadverttoggle, cb_position_advert_toggle, LV_EVENT_VALUE_CHANGED);
 
   reg(ui_purgedatabutton, cb_purge_data);
 
@@ -2018,6 +2199,7 @@ void setup() {
   resolve_pending_on_boot();
   ui_apply_auto_contact_state();
   ui_apply_auto_repeater_state();
+  ui_apply_position_advert_state();
 
   ui_refresh_targets();
 }
@@ -2076,8 +2258,12 @@ void loop() {
   // 1. Incoming chat messages
   if (g_deferred_msg_count > 0) {
     for (int i = 0; i < g_deferred_msg_count; i++) {
-      chat_add(g_deferred_msgs[i].out, g_deferred_msgs[i].txt, false, 0,
-               g_deferred_msgs[i].sig[0] ? g_deferred_msgs[i].sig : nullptr);
+      DeferredChatMsg& msg = g_deferred_msgs[i];
+      lv_obj_t* status_label = chat_add(msg.out, msg.txt, msg.live_status, 0,
+                                        msg.sig[0] ? msg.sig : nullptr);
+      if (msg.out && msg.live_status && msg.msg_ts && g_uimesh) {
+        g_uimesh->bindPmStatusLabel(msg.msg_ts, status_label);
+      }
     }
     g_deferred_msg_count = 0;
   }
@@ -2243,6 +2429,7 @@ void loop() {
 
   if (g_uimesh) g_uimesh->checkPmRetryTimeout();
   if (g_uimesh) g_uimesh->checkPmHardTimeout();
+  if (g_uimesh) g_uimesh->checkPmUnconfirmedExpiry();
 
   // Deferred radio actions
   if (g_deferred_flood_advert) { g_deferred_flood_advert = false; if (g_uimesh) g_uimesh->sendFloodAdvert(0); }
@@ -2269,12 +2456,13 @@ void loop() {
     g_long_press_just_fired = false;
   }
 
-  // PM ring: evict expired entries
+  // PM ring: evict expired entries. 'U' slots are transitioned to 'N' by
+  // checkPmUnconfirmedExpiry() rather than evicted, so we skip them here.
   {
     uint32_t now = millis();
     for (int i = 0; i < PM_RING_SIZE; i++) {
       OutboundPM& s = g_pm_ring[i];
-      if (s.active && s.state != 'P' && s.expiry_ms && (int32_t)(now - s.expiry_ms) > 0) {
+      if (s.active && s.state != 'P' && s.state != 'U' && s.expiry_ms && (int32_t)(now - s.expiry_ms) > 0) {
         s.active = false;
         s.status_label = nullptr;
       }
@@ -2361,8 +2549,25 @@ bool mesh_send_text_to_contact(const uint8_t* pub_key, const char* text) {
 bool mesh_send_text_to_channel(int idx, const char* text) {
   return g_uimesh ? g_uimesh->sendTextToChannelByIdx(idx, text) : false;
 }
+bool mesh_resend_pm_by_bubble_label(struct _lv_obj_t* status_label) {
+  return g_uimesh ? g_uimesh->resendByStatusLabel((lv_obj_t*)status_label) : false;
+}
 const char* mesh_get_node_name() {
   return g_uimesh ? g_uimesh->getNodeName() : "CrowPanel";
+}
+void mesh_get_fixed_position(double* lat, double* lon) {
+  if (lat) *lat = g_uimesh ? g_uimesh->getNodeLat() : 0.0;
+  if (lon) *lon = g_uimesh ? g_uimesh->getNodeLon() : 0.0;
+}
+void mesh_set_fixed_position(double lat, double lon) {
+  if (!g_uimesh) return;
+  g_uimesh->setNodePosition(lat, lon);
+  g_deferred_flood_advert = true;
+}
+void mesh_clear_fixed_position() {
+  if (!g_uimesh) return;
+  g_uimesh->clearNodePosition();
+  g_deferred_flood_advert = true;
 }
 
 void mesh_populate_repeater_list() {

@@ -14,6 +14,8 @@ lv_obj_t * ui_zeroadvertbutton    = NULL;
 lv_obj_t * ui_Label8              = NULL;
 lv_obj_t * ui_fadvertbutton       = NULL;
 lv_obj_t * ui_Label9              = NULL;
+lv_obj_t * ui_positionadverttoggle = NULL;
+lv_obj_t * ui_positionadvert_lbl   = NULL;
 lv_obj_t * ui_Label10             = NULL;
 lv_obj_t * ui_autocontacttoggle   = NULL;
 lv_obj_t * ui_Label11             = NULL;
@@ -84,6 +86,41 @@ static lv_obj_t * make_action_btn(lv_obj_t * parent, lv_obj_t ** lbl_out,
     lv_obj_center(lbl);
     if (lbl_out) *lbl_out = lbl;
     return btn;
+}
+
+static lv_obj_t * make_toggle_row(lv_obj_t * parent, lv_obj_t ** lbl_out, const char * txt) {
+    lv_obj_t * row = lv_obj_create(parent);
+    lv_obj_set_size(row, lv_pct(100), 52);
+    lv_obj_set_style_radius(row, 14, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(TH_SURFACE2), 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, lv_color_hex(TH_BORDER), 0);
+    lv_obj_set_style_shadow_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_hor(row, 14, 0);
+    lv_obj_set_style_pad_ver(row, 10, 0);
+    lv_obj_set_style_pad_column(row, 12, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t * lbl = lv_label_create(row);
+    lv_label_set_text(lbl, txt);
+    lv_obj_set_flex_grow(lbl, 1);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(TH_TEXT), 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+
+    lv_obj_t * sw = lv_switch_create(row);
+    lv_obj_set_size(sw, 54, 30);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(TH_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(TH_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
+
+    if (lbl_out) *lbl_out = lbl;
+    return sw;
 }
 
 static void style_ta(lv_obj_t * ta) {
@@ -338,6 +375,7 @@ void ui_settingscreen_screen_init(void) {
 
     ui_fadvertbutton    = make_action_btn(adv_row, &ui_Label9, BTN_HALF_W, 50);
     ui_zeroadvertbutton = make_action_btn(adv_row, &ui_Label8, BTN_HALF_W, 50);
+    ui_positionadverttoggle = make_toggle_row(form, &ui_positionadvert_lbl, LV_SYMBOL_GPS " Include position in adverts");
 
     // ══════════════════════════════════════════════════════════
     // BRIGHTNESS

@@ -16,6 +16,10 @@ void chats_screen_tick();
 // the node count changes) so SNR/RSSI/last-heard stay current.
 void nodes_screen_tick();
 
+// Called each UI tick; refreshes the Maps screen phone-position instructions
+// so the shown URL tracks the current WiFi IP.
+void maps_screen_tick();
+
 // Called each UI tick; refreshes the Settings screen's live info (uptime,
 // free heap, battery) once per second.
 void settings_screen_tick();

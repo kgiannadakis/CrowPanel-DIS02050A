@@ -11,6 +11,9 @@
 #include "airtime.h"
 #include "configuration.h"
 #include "gps/GeoCoord.h"
+#if HAS_TFT && USE_MCUI
+#include "graphics/mcui/McUI.h"
+#endif
 #include "main.h"
 #include "mesh/compression/unishox2.h"
 #include "meshUtils.h"
@@ -343,6 +346,12 @@ meshtastic_MeshPacket *PositionModule::allocAtakPli()
 
 void PositionModule::sendOurPosition()
 {
+#if HAS_TFT && USE_MCUI
+    if (!mcui::position_advert_enabled()) {
+        LOG_INFO("Skip position send, position advertising is disabled");
+        return;
+    }
+#endif
     bool requestReplies = currentGeneration != radioGeneration;
     currentGeneration = radioGeneration;
 
@@ -359,6 +368,12 @@ void PositionModule::sendOurPosition()
 
 void PositionModule::sendOurPosition(NodeNum dest, bool wantReplies, uint8_t channel)
 {
+#if HAS_TFT && USE_MCUI
+    if (!mcui::position_advert_enabled()) {
+        LOG_INFO("Skip position send, position advertising is disabled");
+        return;
+    }
+#endif
     if (!config.position.fixed_position && !nodeDB->hasLocalPositionSinceBoot()) {
         LOG_DEBUG("Skip position send; no fresh position since boot");
         return;
@@ -423,6 +438,11 @@ int32_t PositionModule::runOnce()
     meshtastic_NodeInfoLite *node = nodeDB->getMeshNode(nodeDB->getNodeNum());
     if (node == nullptr)
         return RUNONCE_INTERVAL;
+
+#if HAS_TFT && USE_MCUI
+    if (!mcui::position_advert_enabled())
+        return RUNONCE_INTERVAL;
+#endif
 
     // We limit our GPS broadcasts to a max rate
     uint32_t now = millis();

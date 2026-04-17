@@ -27,6 +27,8 @@ void cb_auto_repeater_toggle(lv_event_t*);
 void ui_apply_auto_repeater_state();
 void cb_packet_forward_toggle(lv_event_t*);
 void ui_apply_packet_forward_state();
+void cb_position_advert_toggle(lv_event_t*);
+void ui_apply_position_advert_state();
 
 // Speaker toggle
 void ui_apply_speaker_btn_state();

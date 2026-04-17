@@ -32,7 +32,16 @@ bool mesh_discover_contact_path();
 // Direct send without changing UI selection (for bridge/dashboard)
 bool mesh_send_text_to_contact(const uint8_t* pub_key, const char* text);
 bool mesh_send_text_to_channel(int idx, const char* text);
+
+// Resend the PM whose status_label is `status_label`. Reuses the same ring
+// slot / bubble / file entry. Returns true if a matching slot was found and
+// retransmission was queued.
+struct _lv_obj_t;
+bool mesh_resend_pm_by_bubble_label(struct _lv_obj_t* status_label);
 const char* mesh_get_node_name();
+void mesh_get_fixed_position(double* lat, double* lon);
+void mesh_set_fixed_position(double lat, double lon);
+void mesh_clear_fixed_position();
 
 void mesh_populate_repeater_list();
 

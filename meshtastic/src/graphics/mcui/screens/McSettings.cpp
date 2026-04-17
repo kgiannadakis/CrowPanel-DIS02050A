@@ -51,7 +51,10 @@ using namespace meshtastic;
 // device rebooting between each one.
 static volatile bool     s_config_dirty           = false;
 static volatile bool     s_config_save_only_dirty = false;
+static volatile bool     s_orientation_dirty      = false;
+static volatile bool     s_orientation_force_apply = false;
 static volatile bool     s_factory_reset_req      = false;
+static volatile bool     s_pending_landscape      = false;
 static volatile uint32_t s_last_change_ms         = 0;
 static constexpr uint32_t APPLY_DEBOUNCE_MS       = 5000;
 
@@ -79,9 +82,20 @@ static void cfg_mark_save_only()
     cfg_show_pending_banner();
 }
 
+static void cfg_mark_orientation(bool landscape)
+{
+    if (!s_orientation_dirty && landscape == landscape_active())
+        return;
+    s_pending_landscape = landscape;
+    s_orientation_dirty = (landscape != landscape_active());
+    s_last_change_ms = millis();
+    if (s_orientation_dirty)
+        cfg_show_pending_banner();
+}
+
 static bool cfg_has_pending()
 {
-    return s_config_dirty || s_config_save_only_dirty;
+    return s_config_dirty || s_config_save_only_dirty || s_orientation_dirty;
 }
 
 class McConfigApplyThread : public concurrency::OSThread
@@ -99,18 +113,37 @@ class McConfigApplyThread : public concurrency::OSThread
             rebootAtMsec = millis() + 1500;
             return 500;
         }
-        if (!cfg_has_pending()) return 500;
+        bool force_apply = s_orientation_force_apply;
+        if (!cfg_has_pending()) {
+            s_orientation_force_apply = false;
+            return 500;
+        }
         uint32_t now = millis();
-        if (now - s_last_change_ms < APPLY_DEBOUNCE_MS) return 500;
+        if (!force_apply && now - s_last_change_ms < APPLY_DEBOUNCE_MS) return 500;
 
         bool reboot_required = s_config_dirty;
+        bool save_only = s_config_save_only_dirty;
+        bool orientation_change = s_orientation_dirty;
+        bool target_landscape = s_pending_landscape;
+        s_orientation_force_apply = false;
         s_config_dirty = false;
         s_config_save_only_dirty = false;
-        LOG_INFO("mcui: applying pending config (debounce elapsed, reboot=%d)",
-                 reboot_required ? 1 : 0);
-        if (nodeDB) nodeDB->saveToDisk(SEGMENT_CONFIG);
+        s_orientation_dirty = false;
+        LOG_INFO("mcui: applying pending config (debounce elapsed, cfg_reboot=%d orientation=%d)",
+                 reboot_required ? 1 : 0, orientation_change ? 1 : 0);
+        if ((reboot_required || save_only) && nodeDB)
+            nodeDB->saveToDisk(SEGMENT_CONFIG);
+        if (orientation_change && !orientation_save(target_landscape)) {
+            LOG_WARN("mcui: orientation save failed, retrying later");
+            s_pending_landscape = target_landscape;
+            s_orientation_dirty = true;
+            s_last_change_ms = millis();
+            return 1000;
+        }
         if (reboot_required) {
             if (service) service->reloadConfig(SEGMENT_CONFIG);
+        }
+        if (reboot_required || orientation_change) {
             rebootAtMsec = millis() + 1500;
         }
         return 500;
@@ -503,14 +536,99 @@ static lv_obj_t *s_lbl_heap        = nullptr;
 static lv_obj_t *s_lbl_battery     = nullptr;
 static lv_obj_t *s_lbl_noise       = nullptr;
 static lv_obj_t *s_lbl_wifi_ssid   = nullptr;
+static lv_obj_t *s_lbl_orientation = nullptr;
+static lv_obj_t *s_btn_orientation = nullptr;
+static lv_obj_t *s_btn_orientation_label = nullptr;
+static lv_obj_t *s_orientation_overlay = nullptr;
+static lv_obj_t *s_orientation_overlay_label = nullptr;
 // Tappable owner rows — refreshed whenever owner.long_name/short_name change.
 static lv_obj_t *s_lbl_owner_long  = nullptr;
 static lv_obj_t *s_lbl_owner_short = nullptr;
 
 // Hop/tx value labels on the slider rows
 static uint32_t s_last_refresh_ms = 0;
+static uint32_t s_orientation_reboot_at_ms = 0;
+static uint32_t s_orientation_last_countdown = UINT32_MAX;
 
 static void refresh_values();
+
+static void orientation_overlay_close()
+{
+    if (s_orientation_overlay) {
+        lv_obj_delete(s_orientation_overlay);
+        s_orientation_overlay = nullptr;
+    }
+    s_orientation_overlay_label = nullptr;
+    s_orientation_reboot_at_ms = 0;
+    s_orientation_last_countdown = UINT32_MAX;
+}
+
+static void orientation_overlay_update()
+{
+    if (!s_orientation_overlay || !s_orientation_overlay_label || !s_orientation_reboot_at_ms)
+        return;
+
+    uint32_t now = millis();
+    uint32_t secs = 0;
+    if (now < s_orientation_reboot_at_ms)
+        secs = (s_orientation_reboot_at_ms - now + 999) / 1000;
+
+    if (secs != s_orientation_last_countdown) {
+        char buf[32];
+        if (secs > 0)
+            snprintf(buf, sizeof(buf), "Reboot in %u...", (unsigned)secs);
+        else
+            snprintf(buf, sizeof(buf), "Rebooting...");
+        lv_label_set_text(s_orientation_overlay_label, buf);
+        s_orientation_last_countdown = secs;
+    }
+
+    if (now >= s_orientation_reboot_at_ms) {
+        s_orientation_force_apply = true;
+        orientation_overlay_close();
+    }
+}
+
+static void orientation_overlay_open()
+{
+    orientation_overlay_close();
+
+    lv_obj_t *scr = lv_screen_active();
+    s_orientation_overlay = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_orientation_overlay);
+    lv_obj_set_size(s_orientation_overlay, SCR_W, SCR_H);
+    lv_obj_set_pos(s_orientation_overlay, 0, 0);
+    lv_obj_set_style_bg_color(s_orientation_overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_orientation_overlay, LV_OPA_70, 0);
+    lv_obj_remove_flag(s_orientation_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_move_foreground(s_orientation_overlay);
+
+    lv_obj_t *card = lv_obj_create(s_orientation_overlay);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, SCR_W > 460 ? 420 : SCR_W - 40, 150);
+    lv_obj_center(card);
+    lv_obj_set_style_bg_color(card, lv_color_hex(TH_SURFACE), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, 12, 0);
+    lv_obj_set_style_pad_all(card, 18, 0);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(card);
+    lv_label_set_text(title, "Changing orientation");
+    lv_obj_set_style_text_color(title, lv_color_hex(TH_TEXT), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
+
+    s_orientation_overlay_label = lv_label_create(card);
+    lv_label_set_text(s_orientation_overlay_label, "Reboot in 3...");
+    lv_obj_set_style_text_color(s_orientation_overlay_label, lv_color_hex(TH_TEXT2), 0);
+    lv_obj_set_style_text_font(s_orientation_overlay_label, &lv_font_montserrat_16, 0);
+    lv_obj_align(s_orientation_overlay_label, LV_ALIGN_CENTER, 0, 20);
+
+    s_orientation_reboot_at_ms = millis() + 3000;
+    s_orientation_last_countdown = UINT32_MAX;
+    orientation_overlay_update();
+}
 
 static void add_section_header(const char *text)
 {
@@ -657,6 +775,18 @@ static void add_card_hint(lv_obj_t *card, const char *text)
     lv_obj_set_width(h, lv_pct(100));
 }
 
+static int modal_card_height(int desired, int vertical_margin = 40)
+{
+    int max_h = SCR_H - vertical_margin;
+    return (desired < max_h) ? desired : max_h;
+}
+
+static int modal_card_y(int card_h, int top_margin = 20)
+{
+    int y = (SCR_H - card_h) / 2;
+    return (y < top_margin) ? top_margin : y;
+}
+
 // ============================================================================
 //  Reusable text-edit modal
 // ============================================================================
@@ -722,12 +852,13 @@ static void text_edit_modal(const char *title, const char *current,
     lv_obj_remove_flag(s_tem_overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_move_foreground(s_tem_overlay);
 
-    // Card sits above the keyboard. Keyboard covers [SCR_H-KB_H, SCR_H] when
+    // Card sits above the keyboard. Keyboard covers
+    // [SCR_H-keyboard_height(), SCR_H] when
     // visible, so anchor the card a little higher than that.
     lv_obj_t *card = lv_obj_create(s_tem_overlay);
     lv_obj_remove_style_all(card);
     lv_obj_set_size(card, SCR_W - 40, 220);
-    lv_obj_set_pos(card, 20, SCR_H - KB_H - 240);
+    lv_obj_set_pos(card, 20, SCR_H - keyboard_height() - 240);
     lv_obj_set_style_bg_color(card, lv_color_hex(TH_SURFACE), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, 12, 0);
@@ -828,6 +959,17 @@ static void onboarding_focus_cb(lv_event_t *e)
     keyboard_show();
 }
 
+// Tap anywhere on the overlay/card that is NOT a text field dismisses the
+// keyboard, so buttons (Save / Later) underneath the keyboard become reachable.
+static void onboarding_dismiss_kb_cb(lv_event_t *e)
+{
+    lv_obj_t *tgt = (lv_obj_t *)lv_event_get_target(e);
+    // Don't dismiss when the tap went to a textarea — its focus handler is
+    // about to re-open the keyboard, and hiding/showing would just flicker.
+    if (tgt && lv_obj_check_type(tgt, &lv_textarea_class)) return;
+    keyboard_hide();
+}
+
 static lv_obj_t *onboarding_label(lv_obj_t *parent, const char *text, int y)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -900,11 +1042,17 @@ void settings_maybe_show_onboarding()
     lv_obj_set_style_bg_opa(s_onboarding_overlay, LV_OPA_70, 0);
     lv_obj_remove_flag(s_onboarding_overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_move_foreground(s_onboarding_overlay);
+    // Tap outside a textarea (dimmed backdrop, card background, labels, etc.)
+    // dismisses the keyboard so the Save / Later buttons are reachable.
+    lv_obj_add_flag(s_onboarding_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_onboarding_overlay, onboarding_dismiss_kb_cb,
+                        LV_EVENT_CLICKED, nullptr);
 
+    int onboarding_card_h = modal_card_height(470);
     lv_obj_t *card = lv_obj_create(s_onboarding_overlay);
     lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, SCR_W - 40, 470);
-    lv_obj_set_pos(card, 20, 34);
+    lv_obj_set_size(card, SCR_W - 40, onboarding_card_h);
+    lv_obj_set_pos(card, 20, modal_card_y(onboarding_card_h));
     lv_obj_set_style_bg_color(card, lv_color_hex(TH_SURFACE), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, 14, 0);
@@ -1138,10 +1286,11 @@ static void wifi_scan_clicked_cb(lv_event_t *)
     lv_obj_remove_flag(s_wifi_overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_move_foreground(s_wifi_overlay);
 
+    int wifi_card_h = modal_card_height(600);
     lv_obj_t *card = lv_obj_create(s_wifi_overlay);
     lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, SCR_W - 40, 600);
-    lv_obj_set_pos(card, 20, 60);
+    lv_obj_set_size(card, SCR_W - 40, wifi_card_h);
+    lv_obj_set_pos(card, 20, modal_card_y(wifi_card_h));
     lv_obj_set_style_bg_color(card, lv_color_hex(TH_SURFACE), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, 12, 0);
@@ -1162,7 +1311,9 @@ static void wifi_scan_clicked_cb(lv_event_t *)
 
     s_wifi_list = lv_obj_create(card);
     lv_obj_remove_style_all(s_wifi_list);
-    lv_obj_set_size(s_wifi_list, lv_pct(100), 430);
+    int wifi_list_h = wifi_card_h - 56 - 42 - 28;
+    if (wifi_list_h < 160) wifi_list_h = 160;
+    lv_obj_set_size(s_wifi_list, lv_pct(100), wifi_list_h);
     lv_obj_align(s_wifi_list, LV_ALIGN_TOP_LEFT, 0, 56);
     lv_obj_set_style_bg_opa(s_wifi_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_row(s_wifi_list, 4, 0);
@@ -1308,6 +1459,23 @@ static void units_changed_cb(lv_event_t *e)
     if (sel == config.display.units) return;
     config.display.units = sel;
     cfg_mark_dirty();
+}
+
+static bool orientation_target_landscape()
+{
+    return s_orientation_dirty ? s_pending_landscape : landscape_active();
+}
+
+static void orientation_toggle_clicked_cb(lv_event_t *)
+{
+    bool target_landscape = !orientation_target_landscape();
+    if (s_orientation_dirty && s_pending_landscape == target_landscape && s_orientation_overlay)
+        return;
+
+    cfg_mark_orientation(target_landscape);
+    if (s_orientation_dirty)
+        orientation_overlay_open();
+    refresh_values();
 }
 
 // ---- Network ----
@@ -1676,6 +1844,19 @@ static void refresh_values()
         lv_obj_set_style_text_color(s_lbl_wifi_ssid,
                                     lv_color_hex(connected ? 0x45D483 : TH_TEXT), 0);
     }
+    if (s_lbl_orientation) {
+        lv_label_set_text(s_lbl_orientation,
+                          s_orientation_dirty
+                              ? (s_pending_landscape ? "Landscape (pending reboot)"
+                                                     : "Portrait (pending reboot)")
+                              : (landscape_active() ? "Landscape" : "Portrait"));
+    }
+    if (s_btn_orientation_label) {
+        lv_label_set_text(s_btn_orientation_label,
+                          orientation_target_landscape()
+                              ? "Switch to portrait mode"
+                              : "Switch to landscape mode");
+    }
     if (s_lbl_owner_long)
         lv_label_set_text(s_lbl_owner_long,
                           owner.long_name[0] ? owner.long_name : "(tap to set)");
@@ -1841,6 +2022,21 @@ static void rebuild_settings()
     add_enum_dropdown_row(display, "Units",
                           UNITS, UNITS_COUNT, config.display.units,
                           units_changed_cb);
+    s_lbl_orientation = add_info_row(display, "Orientation",
+                                     landscape_active() ? "Landscape" : "Portrait");
+    s_btn_orientation = lv_button_create(display);
+    lv_obj_set_size(s_btn_orientation, lv_pct(100), 46);
+    lv_obj_set_style_bg_color(s_btn_orientation, lv_color_hex(TH_ACCENT), 0);
+    lv_obj_set_style_radius(s_btn_orientation, 10, 0);
+    lv_obj_add_event_cb(s_btn_orientation, orientation_toggle_clicked_cb, LV_EVENT_CLICKED, nullptr);
+    s_btn_orientation_label = lv_label_create(s_btn_orientation);
+    lv_label_set_text(s_btn_orientation_label,
+                      landscape_active() ? "Switch to portrait mode"
+                                         : "Switch to landscape mode");
+    lv_obj_set_style_text_color(s_btn_orientation_label, lv_color_hex(TH_TEXT), 0);
+    lv_obj_set_style_text_font(s_btn_orientation_label, &lv_font_montserrat_16, 0);
+    lv_obj_center(s_btn_orientation_label);
+    add_card_hint(display, "Orientation changes after save and reboot.");
 
     // -------- Network --------
     add_section_header("Network");
@@ -1921,6 +2117,7 @@ lv_obj_t *settings_screen_create(lv_obj_t *parent)
 void settings_screen_tick()
 {
     if (!s_page) return;
+    orientation_overlay_update();
     uint32_t now = millis();
     if (now - s_last_refresh_ms < 1000) return;
     s_last_refresh_ms = now;

@@ -51,7 +51,13 @@ struct NodePrefs {
   uint8_t path_hash_mode;  // 0=1-byte, 1=2-byte, 2=3-byte path hashes
 };
 
-struct DeferredChatMsg { bool out; char txt[256]; char sig[32]; };
+struct DeferredChatMsg {
+  bool out;
+  bool live_status;
+  uint32_t msg_ts;
+  char txt[256];
+  char sig[32];
+};
 
 struct BubbleTapData {
   TargetKind kind;
@@ -188,6 +194,7 @@ extern bool g_notifications_enabled;
 extern bool g_auto_contact_enabled;
 extern bool g_auto_repeater_enabled;
 extern bool g_packet_forward_enabled;
+extern bool g_position_advert_enabled;
 extern bool g_auto_translate_enabled;
 extern int  g_translate_lang_idx;
 extern bool g_manual_discover_active;
@@ -303,6 +310,7 @@ extern char g_repeater_filter[32];
 #define PM_RING_SIZE       8
 #define MAX_PM_ACK_CODES   3   // original + 2 retries
 #define PM_LATE_EXPIRY_MS  120000  // keep failed records 2 min for late ACK
+#define PM_UNCONFIRMED_MS  60000   // show "Unknown, acknowledge will fail in 1'" for 1 min before "Failed"
 
 struct OutboundPM {
   bool     active;

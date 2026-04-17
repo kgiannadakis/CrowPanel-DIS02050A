@@ -14,8 +14,6 @@ namespace mcui {
 // The keyboard is created HIDDEN. It lives in the root screen so the
 // bottom-of-screen placement survives tab switching.
 
-constexpr int KB_H = 280;
-
 lv_obj_t *keyboard_create(lv_obj_t *parent);
 void keyboard_attach(lv_obj_t *textarea);
 void keyboard_show();

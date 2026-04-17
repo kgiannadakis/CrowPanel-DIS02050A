@@ -4,8 +4,14 @@
 #include "RadioLibInterface.h"
 #include "airtime.h"
 #include "main.h"
+#include "mesh/MeshService.h"
+#include "mesh/TypeConversions.h"
 #include "mesh/http/ContentHelper.h"
 #include "mesh/http/WebServer.h"
+#include "modules/PositionModule.h"
+#if !MESHTASTIC_EXCLUDE_GPS
+#include "GPS.h"
+#endif
 #if HAS_WIFI
 #include "mesh/wifi/WiFiAPClient.h"
 #endif
@@ -16,6 +22,8 @@
 #include <HTTPBodyParser.hpp>
 #include <HTTPMultipartBodyParser.hpp>
 #include <HTTPURLEncodedBodyParser.hpp>
+#include <cmath>
+#include <ctime>
 
 #ifdef ARCH_ESP32
 #include "esp_task_wdt.h"
@@ -62,6 +70,108 @@ char const *contentTypes[][2] = {{".txt", "text/plain"},     {".html", "text/htm
 // Our API to handle messages to and from the radio.
 HttpAPI webAPI;
 
+static void markWebActivity()
+{
+    if (webServerThread)
+        webServerThread->markActivity();
+}
+
+static void setJsonHeaders(HTTPResponse *res, const char *methods = "GET")
+{
+    res->setHeader("Content-Type", "application/json");
+    res->setHeader("Access-Control-Allow-Origin", "*");
+    res->setHeader("Access-Control-Allow-Methods", methods);
+    res->setHeader("Cache-Control", "no-store");
+}
+
+static void writeJsonResponse(HTTPResponse *res, JSONValue *value)
+{
+    std::string jsonString = value->Stringify();
+    res->print(jsonString.c_str());
+    delete value;
+}
+
+static JSONValue *makePositionStateValue()
+{
+    JSONObject pos;
+    pos["fixed"] = new JSONValue(BoolToString(config.position.fixed_position));
+    pos["latitude"] = new JSONValue((double)localPosition.latitude_i * 1e-7);
+    pos["longitude"] = new JSONValue((double)localPosition.longitude_i * 1e-7);
+    pos["altitude"] = new JSONValue((int)localPosition.altitude);
+    pos["has_altitude"] = new JSONValue(BoolToString(localPosition.has_altitude));
+
+    JSONObject data;
+    data["position"] = new JSONValue(pos);
+
+    JSONObject outer;
+    outer["data"] = new JSONValue(data);
+    outer["status"] = new JSONValue("ok");
+    return new JSONValue(outer);
+}
+
+static JSONValue *makeErrorValue(const char *message)
+{
+    JSONObject outer;
+    outer["status"] = new JSONValue("error");
+    outer["message"] = new JSONValue(message);
+    return new JSONValue(outer);
+}
+
+static bool parseCoordinate(const std::string &text, double minValue, double maxValue, double &out)
+{
+    if (text.empty())
+        return false;
+
+    char *end = nullptr;
+    out = strtod(text.c_str(), &end);
+    if (end == text.c_str() || (end && *end != '\0') || !std::isfinite(out))
+        return false;
+    return out >= minValue && out <= maxValue;
+}
+
+static bool parseOptionalAltitude(const std::string &text, int32_t &out, bool &hasAltitude)
+{
+    if (text.empty()) {
+        out = 0;
+        hasAltitude = false;
+        return true;
+    }
+
+    char *end = nullptr;
+    double altitude = strtod(text.c_str(), &end);
+    if (end == text.c_str() || (end && *end != '\0') || !std::isfinite(altitude))
+        return false;
+
+    out = (int32_t)lround(altitude);
+    hasAltitude = true;
+    return true;
+}
+
+static void applyFixedPosition(const meshtastic_Position &position)
+{
+    meshtastic_NodeInfoLite *node = nodeDB->getMeshNode(nodeDB->getNodeNum());
+    if (node) {
+        node->has_position = true;
+        node->position = TypeConversions::ConvertToPositionLite(position);
+    }
+    nodeDB->setLocalPosition(position);
+    config.position.fixed_position = true;
+    service->reloadConfig(SEGMENT_NODEDATABASE | SEGMENT_CONFIG);
+#if !MESHTASTIC_EXCLUDE_GPS
+    if (gps != nullptr)
+        gps->enable();
+#endif
+    if (positionModule)
+        positionModule->sendOurPosition();
+}
+
+static void clearFixedPosition()
+{
+    nodeDB->clearLocalPosition();
+    config.position.fixed_position = false;
+    service->reloadConfig(SEGMENT_NODEDATABASE | SEGMENT_CONFIG);
+}
+
 void registerHandlers(HTTPServer *insecureServer, HTTPSServer *secureServer)
 {
 
@@ -77,6 +187,10 @@ void registerHandlers(HTTPServer *insecureServer, HTTPSServer *secureServer)
     //    ResourceNode *nodeHotspotAndroid = new ResourceNode("/generate_204", "GET", &handleHotspot);
 
     ResourceNode *nodeAdmin = new ResourceNode("/admin", "GET", &handleAdmin);
+    ResourceNode *nodePositionPage = new ResourceNode("/position", "GET", &handlePositionPage);
+    ResourceNode *nodePositionJson = new ResourceNode("/json/position", "GET", &handlePositionJson);
+    ResourceNode *nodePositionSet = new ResourceNode("/json/position/set", "GET", &handlePositionSet);
+    ResourceNode *nodePositionClear = new ResourceNode("/json/position/clear", "GET", &handlePositionClear);
     //    ResourceNode *nodeAdminSettings = new ResourceNode("/admin/settings", "GET", &handleAdminSettings);
     //    ResourceNode *nodeAdminSettingsApply = new ResourceNode("/admin/settings/apply", "POST", &handleAdminSettingsApply);
     //    ResourceNode *nodeAdminFs = new ResourceNode("/admin/fs", "GET", &handleFs);
@@ -95,53 +209,65 @@ void registerHandlers(HTTPServer *insecureServer, HTTPSServer *secureServer)
     ResourceNode *nodeRoot = new ResourceNode("/*", "GET", &handleStatic);
 
     // Secure nodes
-    secureServer->registerNode(nodeAPIv1ToRadioOptions);
-    secureServer->registerNode(nodeAPIv1ToRadio);
-    secureServer->registerNode(nodeAPIv1FromRadioOptions);
-    secureServer->registerNode(nodeAPIv1FromRadio);
-    //    secureServer->registerNode(nodeHotspotApple);
-    //    secureServer->registerNode(nodeHotspotAndroid);
-    secureServer->registerNode(nodeRestart);
-    secureServer->registerNode(nodeFormUpload);
-    secureServer->registerNode(nodeJsonScanNetworks);
-    secureServer->registerNode(nodeJsonFsBrowseStatic);
-    secureServer->registerNode(nodeJsonDelete);
-    secureServer->registerNode(nodeJsonReport);
-    secureServer->registerNode(nodeJsonNodes);
-    //    secureServer->registerNode(nodeUpdateFs);
-    //    secureServer->registerNode(nodeDeleteFs);
-    secureServer->registerNode(nodeAdmin);
-    //    secureServer->registerNode(nodeAdminFs);
-    //    secureServer->registerNode(nodeAdminSettings);
-    //    secureServer->registerNode(nodeAdminSettingsApply);
-    secureServer->registerNode(nodeRoot); // This has to be last
+    if (secureServer) {
+        secureServer->registerNode(nodeAPIv1ToRadioOptions);
+        secureServer->registerNode(nodeAPIv1ToRadio);
+        secureServer->registerNode(nodeAPIv1FromRadioOptions);
+        secureServer->registerNode(nodeAPIv1FromRadio);
+        //    secureServer->registerNode(nodeHotspotApple);
+        //    secureServer->registerNode(nodeHotspotAndroid);
+        secureServer->registerNode(nodeRestart);
+        secureServer->registerNode(nodeFormUpload);
+        secureServer->registerNode(nodeJsonScanNetworks);
+        secureServer->registerNode(nodeJsonFsBrowseStatic);
+        secureServer->registerNode(nodeJsonDelete);
+        secureServer->registerNode(nodeJsonReport);
+        secureServer->registerNode(nodeJsonNodes);
+        secureServer->registerNode(nodePositionPage);
+        secureServer->registerNode(nodePositionJson);
+        secureServer->registerNode(nodePositionSet);
+        secureServer->registerNode(nodePositionClear);
+        //    secureServer->registerNode(nodeUpdateFs);
+        //    secureServer->registerNode(nodeDeleteFs);
+        secureServer->registerNode(nodeAdmin);
+        //    secureServer->registerNode(nodeAdminFs);
+        //    secureServer->registerNode(nodeAdminSettings);
+        //    secureServer->registerNode(nodeAdminSettingsApply);
+        secureServer->registerNode(nodeRoot); // This has to be last
+    }
 
     // Insecure nodes
-    insecureServer->registerNode(nodeAPIv1ToRadioOptions);
-    insecureServer->registerNode(nodeAPIv1ToRadio);
-    insecureServer->registerNode(nodeAPIv1FromRadioOptions);
-    insecureServer->registerNode(nodeAPIv1FromRadio);
-    //    insecureServer->registerNode(nodeHotspotApple);
-    //    insecureServer->registerNode(nodeHotspotAndroid);
-    insecureServer->registerNode(nodeRestart);
-    insecureServer->registerNode(nodeFormUpload);
-    insecureServer->registerNode(nodeJsonScanNetworks);
-    insecureServer->registerNode(nodeJsonFsBrowseStatic);
-    insecureServer->registerNode(nodeJsonDelete);
-    insecureServer->registerNode(nodeJsonReport);
-    //    insecureServer->registerNode(nodeUpdateFs);
-    //    insecureServer->registerNode(nodeDeleteFs);
-    insecureServer->registerNode(nodeAdmin);
-    //    insecureServer->registerNode(nodeAdminFs);
-    //    insecureServer->registerNode(nodeAdminSettings);
-    //    insecureServer->registerNode(nodeAdminSettingsApply);
-    insecureServer->registerNode(nodeRoot); // This has to be last
+    if (insecureServer) {
+        insecureServer->registerNode(nodeAPIv1ToRadioOptions);
+        insecureServer->registerNode(nodeAPIv1ToRadio);
+        insecureServer->registerNode(nodeAPIv1FromRadioOptions);
+        insecureServer->registerNode(nodeAPIv1FromRadio);
+        //    insecureServer->registerNode(nodeHotspotApple);
+        //    insecureServer->registerNode(nodeHotspotAndroid);
+        insecureServer->registerNode(nodeRestart);
+        insecureServer->registerNode(nodeFormUpload);
+        insecureServer->registerNode(nodeJsonScanNetworks);
+        insecureServer->registerNode(nodeJsonFsBrowseStatic);
+        insecureServer->registerNode(nodeJsonDelete);
+        insecureServer->registerNode(nodeJsonReport);
+        insecureServer->registerNode(nodeJsonNodes);
+        insecureServer->registerNode(nodePositionPage);
+        insecureServer->registerNode(nodePositionJson);
+        insecureServer->registerNode(nodePositionSet);
+        insecureServer->registerNode(nodePositionClear);
+        //    insecureServer->registerNode(nodeUpdateFs);
+        //    insecureServer->registerNode(nodeDeleteFs);
+        insecureServer->registerNode(nodeAdmin);
+        //    insecureServer->registerNode(nodeAdminFs);
+        //    insecureServer->registerNode(nodeAdminSettings);
+        //    insecureServer->registerNode(nodeAdminSettingsApply);
+        insecureServer->registerNode(nodeRoot); // This has to be last
+    }
 }
 
 void handleAPIv1FromRadio(HTTPRequest *req, HTTPResponse *res)
 {
-    if (webServerThread)
-        webServerThread->markActivity();
+    markWebActivity();
 
     LOG_DEBUG("webAPI handleAPIv1FromRadio");
 
@@ -380,8 +506,7 @@ void handleFsDeleteStatic(HTTPRequest *req, HTTPResponse *res)
 
 void handleStatic(HTTPRequest *req, HTTPResponse *res)
 {
-    if (webServerThread)
-        webServerThread->markActivity();
+    markWebActivity();
 
     // Get access to the parameters
     ResourceParameters *params = req->getParams();
@@ -819,6 +944,7 @@ void handleDeleteFsContent(HTTPRequest *req, HTTPResponse *res)
 
 void handleAdmin(HTTPRequest *req, HTTPResponse *res)
 {
+    markWebActivity();
     res->setHeader("Content-Type", "text/html");
     res->setHeader("Access-Control-Allow-Origin", "*");
     res->setHeader("Access-Control-Allow-Methods", "GET");
@@ -827,6 +953,136 @@ void handleAdmin(HTTPRequest *req, HTTPResponse *res)
     //    res->println("<a href=/admin/settings>Settings</a><br>");
     //    res->println("<a href=/admin/fs>Manage Web Content</a><br>");
     res->println("<a href=/json/report>Device Report</a><br>");
+    res->println("<a href=/position>Set Fixed Position</a><br>");
+}
+
+void handlePositionPage(HTTPRequest *req, HTTPResponse *res)
+{
+    markWebActivity();
+    res->setHeader("Content-Type", "text/html");
+    res->setHeader("Cache-Control", "no-store");
+    res->print(
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Set Position</title>"
+        "<style>"
+        ":root{color-scheme:light dark;--bg:#0f172a;--card:#111827;--text:#e5e7eb;--muted:#94a3b8;--accent:#22c55e;--danger:#ef4444;--field:#1f2937;}"
+        "*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:linear-gradient(180deg,#0f172a,#111827 60%,#172554);color:var(--text)}"
+        ".wrap{max-width:720px;margin:0 auto;padding:20px 16px 32px}.card{background:rgba(17,24,39,.92);border:1px solid rgba(148,163,184,.18);border-radius:18px;padding:18px;box-shadow:0 18px 40px rgba(0,0,0,.28);margin-bottom:16px}"
+        "h1{margin:0 0 8px;font-size:1.7rem}p{margin:0 0 10px;color:var(--muted);line-height:1.45}.status{font-weight:600;margin-top:8px}.coords{font-family:ui-monospace,Consolas,monospace;font-size:.95rem}"
+        ".grid{display:grid;gap:12px}@media(min-width:640px){.grid.two{grid-template-columns:1fr 1fr}}label{display:block;font-size:.95rem;color:var(--muted);margin-bottom:6px}"
+        "input{width:100%;padding:14px;border-radius:12px;border:1px solid rgba(148,163,184,.22);background:var(--field);color:var(--text);font-size:1rem}"
+        ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.btn{appearance:none;border:0;border-radius:12px;padding:14px 16px;font-weight:700;font-size:.98rem;cursor:pointer}"
+        ".primary{background:var(--accent);color:#062814}.secondary{background:#38bdf8;color:#082f49}.ghost{background:#334155;color:var(--text)}.danger{background:var(--danger);color:#fff}"
+        ".note{font-size:.92rem}.banner{display:none;border-radius:12px;padding:12px 14px;margin-bottom:14px;font-weight:600}.banner.ok{display:block;background:rgba(34,197,94,.16);color:#bbf7d0}.banner.err{display:block;background:rgba(239,68,68,.16);color:#fecaca}"
+        "</style></head><body><div class=\"wrap\">"
+        "<div class=\"card\"><h1>Fixed Position</h1>"
+        "<p>Use your phone location or enter coordinates manually. Manual entry stays available if browser geolocation is blocked.</p>"
+        "<div id=\"banner\" class=\"banner\"></div>"
+        "<div class=\"status\" id=\"fixedState\">Loading...</div>"
+        "<p class=\"coords\" id=\"currentCoords\">Checking current position...</p>"
+        "</div>"
+        "<div class=\"card\"><h1 style=\"font-size:1.2rem\">Phone Location</h1>"
+        "<p class=\"note\" id=\"geoNote\">Tap the button below and allow location permission on your phone.</p>"
+        "<div class=\"actions\"><button class=\"btn secondary\" id=\"geoBtn\" type=\"button\">Use My Phone Location</button></div>"
+        "</div>"
+        "<div class=\"card\"><h1 style=\"font-size:1.2rem\">Manual Entry</h1>"
+        "<div class=\"grid two\"><div><label for=\"lat\">Latitude</label><input id=\"lat\" inputmode=\"decimal\" placeholder=\"37.9838\"></div>"
+        "<div><label for=\"lon\">Longitude</label><input id=\"lon\" inputmode=\"decimal\" placeholder=\"23.7275\"></div></div>"
+        "<div class=\"grid\" style=\"margin-top:12px\"><div><label for=\"alt\">Altitude (optional, meters)</label><input id=\"alt\" inputmode=\"decimal\" placeholder=\"120\"></div></div>"
+        "<div class=\"actions\"><button class=\"btn primary\" id=\"saveBtn\" type=\"button\">Save Fixed Position</button><button class=\"btn danger\" id=\"clearBtn\" type=\"button\">Remove Fixed Position</button></div>"
+        "</div>"
+        "<div class=\"card\"><p class=\"note\">If geolocation does not work, try the HTTPS page for this device or enter coordinates manually.</p><p class=\"note\"><a href=\"/admin\" style=\"color:#93c5fd\">Back to admin</a></p></div>"
+        "</div>"
+        "<script>"
+        "const fixedState=document.getElementById('fixedState');const currentCoords=document.getElementById('currentCoords');const banner=document.getElementById('banner');"
+        "const lat=document.getElementById('lat');const lon=document.getElementById('lon');const alt=document.getElementById('alt');const geoBtn=document.getElementById('geoBtn');"
+        "const saveBtn=document.getElementById('saveBtn');const clearBtn=document.getElementById('clearBtn');const geoNote=document.getElementById('geoNote');"
+        "function showBanner(msg,ok){banner.textContent=msg;banner.className='banner '+(ok?'ok':'err');}"
+        "function hideBanner(){banner.className='banner';banner.textContent='';}"
+        "function fmt(n,d=6){return Number(n).toFixed(d).replace(/0+$/,'').replace(/\\.$/,'');}"
+        "async function loadState(){const res=await fetch('/json/position',{cache:'no-store'});const json=await res.json();if(json.status!=='ok')throw new Error(json.message||'Failed to load position');"
+        "const p=json.data.position;const hasCoords=(p.latitude!==0||p.longitude!==0);fixedState.textContent='Fixed position: '+(p.fixed==='true'?'Enabled':'Disabled');"
+        "currentCoords.textContent=hasCoords?('Lat '+fmt(p.latitude)+' | Lon '+fmt(p.longitude)+(p.has_altitude==='true'?' | Alt '+p.altitude+' m':'')):'No fixed position stored yet.';"
+        "if(hasCoords){lat.value=fmt(p.latitude);lon.value=fmt(p.longitude);}alt.value=(hasCoords&&p.has_altitude==='true')?p.altitude:'';}"
+        "async function callApi(url,successMsg){const res=await fetch(url,{cache:'no-store'});const json=await res.json();if(json.status!=='ok')throw new Error(json.message||'Request failed');showBanner(successMsg,true);await loadState();}"
+        "saveBtn.addEventListener('click',async()=>{hideBanner();const params=new URLSearchParams({lat:lat.value.trim(),lon:lon.value.trim(),alt:alt.value.trim()});try{await callApi('/json/position/set?'+params.toString(),'Fixed position saved.');}catch(err){showBanner(err.message,false);}});"
+        "clearBtn.addEventListener('click',async()=>{hideBanner();try{await callApi('/json/position/clear','Fixed position removed.');}catch(err){showBanner(err.message,false);}});"
+        "geoBtn.addEventListener('click',()=>{hideBanner();if(!navigator.geolocation){showBanner('This browser does not support geolocation.',false);return;}geoBtn.disabled=true;geoBtn.textContent='Getting phone location...';"
+        "navigator.geolocation.getCurrentPosition(async(pos)=>{lat.value=String(pos.coords.latitude);lon.value=String(pos.coords.longitude);alt.value=pos.coords.altitude==null?'':String(Math.round(pos.coords.altitude));"
+        "try{const params=new URLSearchParams({lat:lat.value.trim(),lon:lon.value.trim(),alt:alt.value.trim()});await callApi('/json/position/set?'+params.toString(),'Phone location saved as fixed position.');}"
+        "catch(err){showBanner(err.message,false);}finally{geoBtn.disabled=false;geoBtn.textContent='Use My Phone Location';}},"
+        "(err)=>{geoBtn.disabled=false;geoBtn.textContent='Use My Phone Location';showBanner(err.message||'Could not get phone location.',false);},"
+        "{enableHighAccuracy:true,timeout:12000,maximumAge:0});});"
+        "if(!window.isSecureContext){geoNote.textContent='Location permission may be blocked on plain HTTP. Manual entry still works.';}"
+        "loadState().catch(err=>showBanner(err.message,false));"
+        "</script></body></html>");
+}
+
+void handlePositionJson(HTTPRequest *req, HTTPResponse *res)
+{
+    markWebActivity();
+    setJsonHeaders(res);
+    writeJsonResponse(res, makePositionStateValue());
+}
+
+void handlePositionSet(HTTPRequest *req, HTTPResponse *res)
+{
+    markWebActivity();
+    setJsonHeaders(res);
+
+    ResourceParameters *params = req->getParams();
+    std::string latText;
+    std::string lonText;
+    std::string altText;
+    if (!params->getQueryParameter("lat", latText) || !params->getQueryParameter("lon", lonText)) {
+        writeJsonResponse(res, makeErrorValue("Latitude and longitude are required."));
+        return;
+    }
+    params->getQueryParameter("alt", altText);
+
+    double lat = 0.0;
+    double lon = 0.0;
+    if (!parseCoordinate(latText, -90.0, 90.0, lat)) {
+        writeJsonResponse(res, makeErrorValue("Latitude must be between -90 and 90."));
+        return;
+    }
+    if (!parseCoordinate(lonText, -180.0, 180.0, lon)) {
+        writeJsonResponse(res, makeErrorValue("Longitude must be between -180 and 180."));
+        return;
+    }
+
+    int32_t altitude = 0;
+    bool hasAltitude = false;
+    if (!parseOptionalAltitude(altText, altitude, hasAltitude)) {
+        writeJsonResponse(res, makeErrorValue("Altitude must be a valid number."));
+        return;
+    }
+
+    meshtastic_Position pos = meshtastic_Position_init_default;
+    pos.has_latitude_i = true;
+    pos.latitude_i = (int32_t)lround(lat * 1e7);
+    pos.has_longitude_i = true;
+    pos.longitude_i = (int32_t)lround(lon * 1e7);
+    pos.has_altitude = hasAltitude;
+    pos.altitude = altitude;
+    pos.location_source = meshtastic_Position_LocSource_LOC_MANUAL;
+    time_t now = time(nullptr);
+    if (now > 0) {
+        pos.time = (uint32_t)now;
+        pos.timestamp = (uint32_t)now;
+    }
+
+    applyFixedPosition(pos);
+    writeJsonResponse(res, makePositionStateValue());
+}
+
+void handlePositionClear(HTTPRequest *req, HTTPResponse *res)
+{
+    markWebActivity();
+    setJsonHeaders(res);
+    clearFixedPosition();
+    writeJsonResponse(res, makePositionStateValue());
 }
 
 void handleAdminSettings(HTTPRequest *req, HTTPResponse *res)

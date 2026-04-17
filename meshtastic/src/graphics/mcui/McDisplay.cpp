@@ -21,9 +21,6 @@ namespace mcui {
 // natively. LVGL then draws portrait without any rotation layer, and the
 // flush just calls pushImageDMA() — LGFX handles the pixel transform into
 // the RGB panel's internal framebuffer.
-static constexpr uint16_t NATIVE_W = 800;
-static constexpr uint16_t NATIVE_H = 480;
-
 static LGFX_ELECROW70 *gfx = nullptr;
 static lv_display_t *disp = nullptr;
 static lv_indev_t *indev = nullptr;
@@ -31,8 +28,8 @@ static lv_color_t *buf1 = nullptr;
 static lv_color_t *buf2 = nullptr;
 
 // ---- LVGL flush callback ---------------------------------------------------
-// Area is in logical 480x800 portrait space. LovyanGFX's rotation (set via
-// setRotation(1)) transforms the coordinates into the physical 800x480
+// Area is in the logical mcui coordinate space. LovyanGFX's rotation
+// transforms the coordinates into the physical 800x480
 // framebuffer automatically.
 static void flush_cb(lv_display_t *d, const lv_area_t *area, uint8_t *px_map)
 {
@@ -96,20 +93,21 @@ void display_init()
     // ---- LovyanGFX bringup ----
     gfx = new LGFX_ELECROW70();
     gfx->init();
-    gfx->setRotation(1);        // portrait via 90° CW software rotation
+    gfx->setRotation(landscape_active() ? 0 : 1);
     gfx->setSwapBytes(true);    // LVGL outputs native-endian RGB565; panel wants swapped
     gfx->setBrightness(255);
     gfx->fillScreen(TFT_BLACK); // clear the whole panel framebuffer
 
-    LOG_INFO("mcui: LovyanGFX ready, logical %dx%d (rotated)",
-             (int)gfx->width(), (int)gfx->height());
+    LOG_INFO("mcui: LovyanGFX ready, logical %dx%d (%s)",
+             (int)gfx->width(), (int)gfx->height(),
+             landscape_active() ? "landscape" : "portrait");
 
     // ---- LVGL core ----
     lv_init();
     lv_tick_set_cb(reinterpret_cast<lv_tick_get_cb_t>(millis));
 
     // ---- Draw buffers ----
-    // Two partial buffers, each 480 wide × 200 rows = 192 KB in PSRAM. This
+    // Two partial buffers, each SCR_W wide x 200 rows in PSRAM. This
     // matches MeshCore's crowpanel_lvgl_chat reference (~96000 pixels each).
     // A bigger buffer means fewer flush round-trips per refresh, which is
     // the dominant cost on this panel — notably the keyboard redraw shrinks
@@ -140,14 +138,12 @@ void display_init()
     }
 
     // ---- Display object ----
-    // Create with the LOGICAL (rotated) dimensions — LVGL thinks the screen
-    // is 480 × 800 portrait, which matches what LovyanGFX reports after
-    // setRotation(1).
+    // Create with the current logical dimensions.
     disp = lv_display_create(SCR_W, SCR_H);
     lv_display_set_flush_cb(disp, flush_cb);
     lv_display_set_buffers(disp, buf1, buf2, bufBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
     // No lv_display_set_rotation() — the panel is already rotated at the
-    // LovyanGFX level, so LVGL renders directly into 480×800.
+    // LovyanGFX level, so LVGL renders directly into the current logical space.
 
     // ---- Touch input device ----
     indev = lv_indev_create();
@@ -180,7 +176,8 @@ void display_init()
         backlight_set_timeout_secs(secs);
     }
 
-    LOG_INFO("mcui: LVGL ready, logical %dx%d portrait", SCR_W, SCR_H);
+    LOG_INFO("mcui: LVGL ready, logical %dx%d %s",
+             SCR_W, SCR_H, landscape_active() ? "landscape" : "portrait");
 }
 
 } // namespace mcui

@@ -440,9 +440,7 @@ static void onNetworkConnected()
         }
 
 #if defined(ARCH_ESP32) && !MESHTASTIC_EXCLUDE_WEBSERVER
-        if (config.display.displaymode != meshtastic_Config_DisplayConfig_DisplayMode_COLOR) {
-            initWebServer();
-        }
+        initWebServer();
 #endif
 #if !MESHTASTIC_EXCLUDE_SOCKETAPI
         if (config.display.displaymode != meshtastic_Config_DisplayConfig_DisplayMode_COLOR) {

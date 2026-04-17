@@ -73,6 +73,16 @@ void statusbar_refresh()
     s_last_time_text[sizeof(s_last_time_text) - 1] = '\0';
 }
 
+void statusbar_set_visible(bool visible)
+{
+    if (!s_bar)
+        return;
+    if (visible)
+        lv_obj_remove_flag(s_bar, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(s_bar, LV_OBJ_FLAG_HIDDEN);
+}
+
 } // namespace mcui
 
 #endif

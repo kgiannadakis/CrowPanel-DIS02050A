@@ -8,8 +8,23 @@
 
 #if defined(ESP32)
 #include <WiFi.h>
+#include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
+#include <math.h>
+
+/*
+  The esp32_https_server headers can trip over a macro named `str`.
+  Meshtastic applies the same undef before including the library.
+*/
+#undef str
+#include <HTTPRequest.hpp>
+#include <HTTPResponse.hpp>
+#include <HTTPSServer.hpp>
+#include <HTTPServer.hpp>
+#include <ResourceNode.hpp>
+#include <SSLCert.hpp>
+using namespace httpsserver;
 #endif
 
 extern bool g_wifi_connected;
@@ -18,11 +33,25 @@ extern bool g_wifi_connected;
 
 static bool s_running = false;
 static bool s_initialized = false;
-static char s_status[80] = "Disabled";
+static char s_status[128] = "Disabled";
 
 #if defined(ESP32)
 static AsyncWebServer s_server(80);
 static AsyncWebSocket s_ws("/ws");
+static HTTPSServer* s_secure_server = nullptr;
+static SSLCert* s_ssl_cert = nullptr;
+static ResourceNode* s_secure_node_index = nullptr;
+static ResourceNode* s_secure_node_position_page = nullptr;
+static ResourceNode* s_secure_node_position_json = nullptr;
+static ResourceNode* s_secure_node_position_set = nullptr;
+static ResourceNode* s_secure_node_position_clear = nullptr;
+static volatile bool s_ssl_cert_ready = false;
+static volatile bool s_ssl_cert_task_running = false;
+static bool s_secure_running = false;
+static uint32_t s_last_https_attempt_ms = 0;
+static const uint8_t MAX_HTTPS_CONNECTIONS = 2;
+static const uint32_t HTTPS_RETRY_MS = 30000;
+static const uint32_t MIN_HEAP_FOR_SSL = 40000;
 #endif
 
 // ── Embedded HTML ───────────────────────────────────────────
@@ -68,6 +97,14 @@ select{cursor:pointer}
 .btn-row button.danger{border-color:#e74c3c}
 .btn-row button.danger:hover{background:#e74c3c}
 .btn-row button:disabled{opacity:0.4;cursor:not-allowed}
+.hint{color:#9fb0bc;line-height:1.45;margin:0 0 10px}
+.status{font-weight:600;color:#f5f5f5;margin-bottom:6px}
+.coords{font-family:ui-monospace,Consolas,monospace;color:#d7e0e7;margin-bottom:10px}
+.grid{display:grid;gap:12px}
+@media(min-width:640px){.grid.two{grid-template-columns:1fr 1fr}}
+.banner{display:none;border-radius:10px;padding:12px 14px;margin-top:12px;font-weight:600}
+.banner.ok{display:block;background:rgba(51,195,107,0.14);color:#b7f5ca}
+.banner.err{display:block;background:rgba(231,76,60,0.16);color:#ffd0cb}
 #rptmon{white-space:pre-wrap;font-size:0.82em;color:#e0e0e0;max-height:350px;overflow-y:auto;padding:8px;background:#0e1621;border-radius:8px;margin-top:8px;font-family:monospace;line-height:1.4}
 </style></head><body>
 <h1>&#x1F4E1; MeshCore Dashboard</h1>
@@ -89,6 +126,30 @@ select{cursor:pointer}
 <input id="msg" placeholder="Type message..." maxlength="240" onkeydown="if(event.key==='Enter')send()">
 <button onclick="send()">Send</button>
 </div>
+</div>
+
+<h2 id="position">Device Position</h2>
+<div class="card" id="poscard">
+<div class="status" id="fixedState">Loading...</div>
+<p class="coords" id="currentCoords">Checking current position...</p>
+<p class="hint" id="geoNote">Tap the button below to try filling the fields from your phone location.</p>
+<div class="grid two">
+<div>
+<label for="lat">Latitude</label>
+<input id="lat" inputmode="decimal" placeholder="37.9838">
+</div>
+<div>
+<label for="lon">Longitude</label>
+<input id="lon" inputmode="decimal" placeholder="23.7275">
+</div>
+</div>
+<div class="btn-row">
+<button id="geoBtn" type="button">Use My Phone Location</button>
+<button id="saveBtn" type="button">Save Position</button>
+<button class="danger" id="clearBtn" type="button">Clear Position</button>
+</div>
+<div class="banner" id="banner"></div>
+<p class="hint" id="secureHint" style="margin-top:12px;margin-bottom:0">Manual entry works here. Phone geolocation needs the secure dashboard page.</p>
 </div>
 </div>
 
@@ -123,6 +184,7 @@ function showTab(t){
 }
 
 function conn(){
+  if(location.protocol==='https:') return;
   ws=new WebSocket('ws://'+location.host+'/ws');
   ws.onmessage=e=>{
     let d=JSON.parse(e.data);
@@ -221,7 +283,106 @@ async function send(){
   }catch(e){appendBubble(true,m,'now','N');}
 }
 
+const fixedState=document.getElementById('fixedState');
+const currentCoords=document.getElementById('currentCoords');
+const banner=document.getElementById('banner');
+const lat=document.getElementById('lat');
+const lon=document.getElementById('lon');
+const geoBtn=document.getElementById('geoBtn');
+const saveBtn=document.getElementById('saveBtn');
+const clearBtn=document.getElementById('clearBtn');
+const geoNote=document.getElementById('geoNote');
+const secureHint=document.getElementById('secureHint');
+
+function showBanner(msg,ok){
+  banner.textContent=msg;
+  banner.className='banner '+(ok?'ok':'err');
+}
+function hideBanner(){
+  banner.className='banner';
+  banner.textContent='';
+}
+function fmt(n){
+  return Number(n).toFixed(6).replace(/0+$/,'').replace(/\.$/,'');
+}
+async function loadPositionState(){
+  const res=await fetch('/json/position',{cache:'no-store'});
+  const json=await res.json();
+  if(json.status!=='ok') throw new Error(json.message||'Failed to load position');
+  const p=json.data.position;
+  const hasCoords=!!p.fixed;
+  fixedState.textContent='Fixed position: '+(hasCoords?'Enabled':'Disabled');
+  currentCoords.textContent=hasCoords?('Lat '+fmt(p.latitude)+' | Lon '+fmt(p.longitude)):'No fixed position saved yet.';
+  if(hasCoords){
+    lat.value=fmt(p.latitude);
+    lon.value=fmt(p.longitude);
+  }else{
+    lat.value='';
+    lon.value='';
+  }
+}
+async function callPositionApi(url,successMsg){
+  const res=await fetch(url,{cache:'no-store'});
+  const json=await res.json();
+  if(json.status!=='ok') throw new Error(json.message||'Request failed');
+  showBanner(successMsg,true);
+  await loadPositionState();
+}
+saveBtn.addEventListener('click',async()=>{
+  hideBanner();
+  const params=new URLSearchParams({lat:lat.value.trim(),lon:lon.value.trim()});
+  try{
+    await callPositionApi('/json/position/set?'+params.toString(),'Fixed position saved.');
+  }catch(err){
+    showBanner(err.message,false);
+  }
+});
+clearBtn.addEventListener('click',async()=>{
+  hideBanner();
+  try{
+    await callPositionApi('/json/position/clear','Fixed position removed.');
+  }catch(err){
+    showBanner(err.message,false);
+  }
+});
+geoBtn.addEventListener('click',()=>{
+  hideBanner();
+  if(!window.isSecureContext){
+    window.location.href='https://'+location.hostname+'/#position';
+    return;
+  }
+  if(!navigator.geolocation){
+    showBanner('This browser does not support geolocation.',false);
+    return;
+  }
+  geoBtn.disabled=true;
+  geoBtn.textContent='Getting phone location...';
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{
+      lat.value=String(pos.coords.latitude);
+      lon.value=String(pos.coords.longitude);
+      geoBtn.disabled=false;
+      geoBtn.textContent='Use My Phone Location';
+      showBanner('Phone coordinates loaded into the fields. Tap Save Position to store them.',true);
+    },
+    (err)=>{
+      geoBtn.disabled=false;
+      geoBtn.textContent='Use My Phone Location';
+      showBanner(err.message||'Could not get phone location.',false);
+    },
+    {enableHighAccuracy:true,timeout:12000,maximumAge:0}
+  );
+});
+if(!window.isSecureContext){
+  geoNote.textContent='Manual entry works here. For phone location, open the secure dashboard page.';
+  secureHint.innerHTML='For phone geolocation, open <b>https://'+location.hostname+'/</b> and accept the certificate warning once.';
+  geoBtn.textContent='Open Secure Dashboard';
+}else{
+  secureHint.textContent='You are on the secure dashboard. Phone geolocation should be available if your browser grants permission.';
+}
+
 loadStats();loadTargets();
+loadPositionState().catch(err=>showBanner(err.message,false));
 setInterval(loadStats,15000);
 setInterval(loadTargets,30000);
 
@@ -308,11 +469,334 @@ async function rptDelete(){
 setInterval(()=>{if(document.getElementById('sec-rpt').classList.contains('active')&&curRpt)rptPollMon();},5000);
 </script></body></html>
 )rawliteral";
+
+static const char POSITION_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MeshCore Position</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0e1621;color:#f5f5f5;padding:16px;max-width:640px;margin:0 auto}
+h1{font-size:1.45em;color:#5eb5f7;margin:0 0 10px}
+p{color:#9fb0bc;line-height:1.45}
+.card{background:#17212b;border-radius:14px;padding:14px;margin:14px 0}
+.status{font-weight:600;color:#f5f5f5}
+.coords{font-family:ui-monospace,Consolas,monospace;color:#d7e0e7}
+label{display:block;font-size:0.92em;color:#9fb0bc;margin-bottom:6px}
+input{width:100%;background:#242f3d;border:1px solid #2b3b4d;border-radius:10px;color:#f5f5f5;padding:11px 12px;font-size:1em}
+.grid{display:grid;gap:12px}
+@media(min-width:640px){.grid.two{grid-template-columns:1fr 1fr}}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+button{border:none;border-radius:10px;padding:11px 16px;font-size:0.95em;font-weight:700;cursor:pointer}
+.primary{background:#33c36b;color:#072714}
+.secondary{background:#3390ec;color:#fff}
+.danger{background:#e74c3c;color:#fff}
+.muted{background:#242f3d;color:#f5f5f5;border:1px solid #2b3b4d}
+.banner{display:none;border-radius:10px;padding:12px 14px;margin-top:12px;font-weight:600}
+.banner.ok{display:block;background:rgba(51,195,107,0.14);color:#b7f5ca}
+.banner.err{display:block;background:rgba(231,76,60,0.16);color:#ffd0cb}
+a{color:#8ec8ff}
+</style></head><body>
+<div class="card">
+  <h1>Fixed Device Position</h1>
+  <p>Save a fixed latitude and longitude for this MeshCore device.</p>
+  <div class="status" id="fixedState">Loading...</div>
+  <p class="coords" id="currentCoords">Checking current position...</p>
+  <div class="banner" id="banner"></div>
+</div>
+
+<div class="card">
+  <h1 style="font-size:1.08em">Phone Location</h1>
+  <p id="geoNote">Tap the button below to try filling the fields from your phone location.</p>
+  <div class="btns">
+    <button class="secondary" id="geoBtn" type="button">Use My Phone Location</button>
+  </div>
+</div>
+
+<div class="card">
+  <h1 style="font-size:1.08em">Manual Entry</h1>
+  <div class="grid two">
+    <div>
+      <label for="lat">Latitude</label>
+      <input id="lat" inputmode="decimal" placeholder="37.9838">
+    </div>
+    <div>
+      <label for="lon">Longitude</label>
+      <input id="lon" inputmode="decimal" placeholder="23.7275">
+    </div>
+  </div>
+  <div class="btns">
+    <button class="primary" id="saveBtn" type="button">Save Position</button>
+    <button class="danger" id="clearBtn" type="button">Clear Position</button>
+    <button class="muted" id="backBtn" type="button">Back to Dashboard</button>
+  </div>
+</div>
+
+<div class="card">
+  <p id="secureHint">For phone geolocation, use the HTTPS version of this page. Manual entry still works over plain HTTP.</p>
+</div>
+
+<script>
+const fixedState=document.getElementById('fixedState');
+const currentCoords=document.getElementById('currentCoords');
+const banner=document.getElementById('banner');
+const lat=document.getElementById('lat');
+const lon=document.getElementById('lon');
+const geoBtn=document.getElementById('geoBtn');
+const saveBtn=document.getElementById('saveBtn');
+const clearBtn=document.getElementById('clearBtn');
+const backBtn=document.getElementById('backBtn');
+const geoNote=document.getElementById('geoNote');
+const secureHint=document.getElementById('secureHint');
+
+function showBanner(msg,ok){
+  banner.textContent=msg;
+  banner.className='banner '+(ok?'ok':'err');
+}
+function hideBanner(){
+  banner.className='banner';
+  banner.textContent='';
+}
+function fmt(n){
+  return Number(n).toFixed(6).replace(/0+$/,'').replace(/\.$/,'');
+}
+async function loadState(){
+  const res=await fetch('/json/position',{cache:'no-store'});
+  const json=await res.json();
+  if(json.status!=='ok') throw new Error(json.message||'Failed to load position');
+  const p=json.data.position;
+  const hasCoords=!!p.fixed;
+  fixedState.textContent='Fixed position: '+(hasCoords?'Enabled':'Disabled');
+  currentCoords.textContent=hasCoords?('Lat '+fmt(p.latitude)+' | Lon '+fmt(p.longitude)):'No fixed position saved yet.';
+  if(hasCoords){
+    lat.value=fmt(p.latitude);
+    lon.value=fmt(p.longitude);
+  } else {
+    lat.value='';
+    lon.value='';
+  }
+}
+async function callApi(url,successMsg){
+  const res=await fetch(url,{cache:'no-store'});
+  const json=await res.json();
+  if(json.status!=='ok') throw new Error(json.message||'Request failed');
+  showBanner(successMsg,true);
+  await loadState();
+}
+saveBtn.addEventListener('click',async()=>{
+  hideBanner();
+  const params=new URLSearchParams({lat:lat.value.trim(),lon:lon.value.trim()});
+  try{
+    await callApi('/json/position/set?'+params.toString(),'Fixed position saved.');
+  }catch(err){
+    showBanner(err.message,false);
+  }
+});
+clearBtn.addEventListener('click',async()=>{
+  hideBanner();
+  try{
+    await callApi('/json/position/clear','Fixed position removed.');
+  }catch(err){
+    showBanner(err.message,false);
+  }
+});
+backBtn.addEventListener('click',()=>window.location.href='/');
+geoBtn.addEventListener('click',()=>{
+  hideBanner();
+  if(!navigator.geolocation){
+    showBanner('This browser does not support geolocation.',false);
+    return;
+  }
+  geoBtn.disabled=true;
+  geoBtn.textContent='Getting phone location...';
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{
+      lat.value=String(pos.coords.latitude);
+      lon.value=String(pos.coords.longitude);
+      geoBtn.disabled=false;
+      geoBtn.textContent='Use My Phone Location';
+      showBanner('Phone coordinates loaded into the fields. Tap Save Position to store them.',true);
+    },
+    (err)=>{
+      geoBtn.disabled=false;
+      geoBtn.textContent='Use My Phone Location';
+      showBanner(err.message||'Could not get phone location.',false);
+    },
+    {enableHighAccuracy:true,timeout:12000,maximumAge:0}
+  );
+});
+if(!window.isSecureContext){
+  geoNote.textContent='Your browser may block phone location on this HTTP page. Manual entry still works.';
+  secureHint.innerHTML='For phone geolocation, open <b>https://'+location.hostname+'/position</b> and accept the certificate warning once.';
+}else{
+  secureHint.textContent='You are on the secure position page. Phone geolocation should be available if your browser grants permission.';
+}
+loadState().catch(err=>showBanner(err.message,false));
+</script>
+</body></html>
+)rawliteral";
 #endif
 
 // ── REST API handlers ───────────────────────────────────────
 
 #if defined(ESP32)
+
+static String position_state_json() {
+    double lat = 0.0;
+    double lon = 0.0;
+    mesh_get_fixed_position(&lat, &lon);
+
+    char buf[192];
+    snprintf(buf, sizeof(buf),
+        "{\"status\":\"ok\",\"data\":{\"position\":{\"latitude\":%.7f,\"longitude\":%.7f,\"fixed\":%s},\"advertise\":%s}}",
+        lat, lon,
+        (lat != 0.0 || lon != 0.0) ? "true" : "false",
+        g_position_advert_enabled ? "true" : "false");
+    return String(buf);
+}
+
+static String position_error_json(const char* message) {
+    char buf[192];
+    snprintf(buf, sizeof(buf), "{\"status\":\"error\",\"message\":\"%s\"}", message ? message : "Request failed.");
+    return String(buf);
+}
+
+static void update_webdash_status() {
+    if (!g_webdash_enabled) {
+        snprintf(s_status, sizeof(s_status), "Disabled");
+    } else if (!g_wifi_connected) {
+        snprintf(s_status, sizeof(s_status), "WiFi required");
+    } else {
+        String ip = WiFi.localIP().toString();
+        if (s_running && s_secure_running) {
+            snprintf(s_status, sizeof(s_status), "http://%s | https://%s", ip.c_str(), ip.c_str());
+        } else if (s_running && s_ssl_cert_task_running) {
+            snprintf(s_status, sizeof(s_status), "http://%s | HTTPS starting...", ip.c_str());
+        } else if (s_running) {
+            snprintf(s_status, sizeof(s_status), "http://%s", ip.c_str());
+        } else if (s_ssl_cert_task_running) {
+            snprintf(s_status, sizeof(s_status), "Generating HTTPS cert...");
+        } else {
+            snprintf(s_status, sizeof(s_status), "Starting...");
+        }
+    }
+    g_deferred_features_dirty = true;
+}
+
+static bool parse_bounded_double(const String& text, double min_value, double max_value, double& out) {
+    char* end = nullptr;
+    out = strtod(text.c_str(), &end);
+    while (end && *end == ' ') end++;
+    return end && end != text.c_str() && *end == '\0' && isfinite(out) && out >= min_value && out <= max_value;
+}
+
+static void handle_position_page(AsyncWebServerRequest* req) {
+    if (s_secure_running) {
+        const String url = String("https://") + WiFi.localIP().toString() + "/#position";
+        req->redirect(url);
+        return;
+    }
+    req->redirect("/#position");
+}
+
+static void handle_position_json(AsyncWebServerRequest* req) {
+    req->send(200, "application/json", position_state_json());
+}
+
+static void handle_position_set(AsyncWebServerRequest* req) {
+    if (!req->hasParam("lat") || !req->hasParam("lon")) {
+        req->send(400, "application/json", position_error_json("Latitude and longitude are required."));
+        return;
+    }
+
+    double lat = 0.0;
+    double lon = 0.0;
+    if (!parse_bounded_double(req->getParam("lat")->value(), -90.0, 90.0, lat)) {
+        req->send(400, "application/json", position_error_json("Latitude must be between -90 and 90."));
+        return;
+    }
+    if (!parse_bounded_double(req->getParam("lon")->value(), -180.0, 180.0, lon)) {
+        req->send(400, "application/json", position_error_json("Longitude must be between -180 and 180."));
+        return;
+    }
+
+    mesh_set_fixed_position(lat, lon);
+    handle_position_json(req);
+}
+
+static void handle_position_clear(AsyncWebServerRequest* req) {
+    mesh_clear_fixed_position();
+    handle_position_json(req);
+}
+
+static void secure_write_json(HTTPResponse* res, uint16_t statusCode, const String& body) {
+    if (!res) return;
+    res->setStatusCode(statusCode);
+    res->setHeader("Content-Type", "application/json");
+    res->setHeader("Cache-Control", "no-store");
+    res->print(body.c_str());
+}
+
+static void secure_redirect(HTTPResponse* res, const char* location) {
+    if (!res) return;
+    res->setStatusCode(302);
+    res->setHeader("Location", location ? location : "/");
+    res->setHeader("Cache-Control", "no-store");
+    res->println("");
+}
+
+static void secure_handle_index_page(HTTPRequest* req, HTTPResponse* res) {
+    if (!res) return;
+    res->setHeader("Content-Type", "text/html");
+    res->setHeader("Cache-Control", "no-store");
+    res->print(INDEX_HTML);
+}
+
+static void secure_handle_position_page(HTTPRequest* req, HTTPResponse* res) {
+    secure_redirect(res, "/#position");
+}
+
+static void secure_handle_position_json(HTTPRequest* req, HTTPResponse* res) {
+    secure_write_json(res, 200, position_state_json());
+}
+
+static bool secure_get_query_parameter(HTTPRequest* req, const char* name, String& value) {
+    if (!req || !name) return false;
+    ResourceParameters* params = req->getParams();
+    if (!params) return false;
+    std::string text;
+    if (!params->getQueryParameter(name, text)) return false;
+    value = String(text.c_str());
+    return true;
+}
+
+static void secure_handle_position_set(HTTPRequest* req, HTTPResponse* res) {
+    String latText;
+    String lonText;
+    if (!secure_get_query_parameter(req, "lat", latText) || !secure_get_query_parameter(req, "lon", lonText)) {
+        secure_write_json(res, 400, position_error_json("Latitude and longitude are required."));
+        return;
+    }
+
+    double lat = 0.0;
+    double lon = 0.0;
+    if (!parse_bounded_double(latText, -90.0, 90.0, lat)) {
+        secure_write_json(res, 400, position_error_json("Latitude must be between -90 and 90."));
+        return;
+    }
+    if (!parse_bounded_double(lonText, -180.0, 180.0, lon)) {
+        secure_write_json(res, 400, position_error_json("Longitude must be between -180 and 180."));
+        return;
+    }
+
+    mesh_set_fixed_position(lat, lon);
+    secure_write_json(res, 200, position_state_json());
+}
+
+static void secure_handle_position_clear(HTTPRequest* req, HTTPResponse* res) {
+    mesh_clear_fixed_position();
+    secure_write_json(res, 200, position_state_json());
+}
 
 static void handle_stats(AsyncWebServerRequest* req) {
     char buf[256];
@@ -638,6 +1122,100 @@ static void handle_rpt_delete(AsyncWebServerRequest* req, uint8_t* data, size_t 
     req->send(ok ? 200 : 500, "text/plain", ok ? "OK" : "Failed");
 }
 
+static void ensure_secure_nodes() {
+    if (!s_secure_node_index)          s_secure_node_index          = new ResourceNode("/", "GET", &secure_handle_index_page);
+    if (!s_secure_node_position_page)  s_secure_node_position_page  = new ResourceNode("/position", "GET", &secure_handle_position_page);
+    if (!s_secure_node_position_json)  s_secure_node_position_json  = new ResourceNode("/json/position", "GET", &secure_handle_position_json);
+    if (!s_secure_node_position_set)   s_secure_node_position_set   = new ResourceNode("/json/position/set", "GET", &secure_handle_position_set);
+    if (!s_secure_node_position_clear) s_secure_node_position_clear = new ResourceNode("/json/position/clear", "GET", &secure_handle_position_clear);
+}
+
+static void stop_secure_server() {
+    if (s_secure_server) {
+        delete s_secure_server;
+        s_secure_server = nullptr;
+    }
+    if (s_secure_running) {
+        s_secure_running = false;
+        serialmon_append("HTTPS dashboard stopped");
+    }
+    update_webdash_status();
+}
+
+static void start_secure_server() {
+    if (s_secure_running || !g_wifi_connected || !s_ssl_cert_ready || !s_ssl_cert) return;
+    if (ESP.getFreeHeap() < MIN_HEAP_FOR_SSL) {
+        serialmon_append("HTTPS dashboard skipped: low heap");
+        return;
+    }
+
+    ensure_secure_nodes();
+    s_secure_server = new HTTPSServer(s_ssl_cert, 443, MAX_HTTPS_CONNECTIONS);
+    s_secure_server->registerNode(s_secure_node_index);
+    s_secure_server->registerNode(s_secure_node_position_page);
+    s_secure_server->registerNode(s_secure_node_position_json);
+    s_secure_server->registerNode(s_secure_node_position_set);
+    s_secure_server->registerNode(s_secure_node_position_clear);
+
+    if (s_secure_server->start()) {
+        s_secure_running = true;
+        char buf[96];
+        snprintf(buf, sizeof(buf), "Secure dashboard at https://%s", WiFi.localIP().toString().c_str());
+        serialmon_append(buf);
+    } else {
+        serialmon_append("HTTPS dashboard failed to start");
+        delete s_secure_server;
+        s_secure_server = nullptr;
+    }
+    update_webdash_status();
+}
+
+static void task_create_ssl_cert(void* parameter) {
+    Preferences prefs;
+    prefs.begin("MeshCoreHTTPS", false);
+
+    size_t pkLen = prefs.getBytesLength("PK");
+    size_t certLen = prefs.getBytesLength("cert");
+
+    if (pkLen && certLen) {
+        uint8_t* pkBuffer = new uint8_t[pkLen];
+        prefs.getBytes("PK", pkBuffer, pkLen);
+
+        uint8_t* certBuffer = new uint8_t[certLen];
+        prefs.getBytes("cert", certBuffer, certLen);
+
+        s_ssl_cert = new SSLCert(certBuffer, certLen, pkBuffer, pkLen);
+    } else {
+        s_ssl_cert = new SSLCert();
+        int result = createSelfSignedCert(*s_ssl_cert, KEYSIZE_2048, "CN=meshcore.local,O=MeshCore,C=US",
+                                          "20260101000000", "20360101000000");
+        if (result == 0) {
+            prefs.putBytes("PK", (uint8_t*)s_ssl_cert->getPKData(), s_ssl_cert->getPKLength());
+            prefs.putBytes("cert", (uint8_t*)s_ssl_cert->getCertData(), s_ssl_cert->getCertLength());
+        } else {
+            delete s_ssl_cert;
+            s_ssl_cert = nullptr;
+        }
+    }
+
+    prefs.end();
+    s_ssl_cert_ready = (s_ssl_cert != nullptr);
+    s_ssl_cert_task_running = false;
+    update_webdash_status();
+    vTaskDelete(NULL);
+}
+
+static void ensure_ssl_cert_task() {
+    if (s_ssl_cert_ready || s_ssl_cert_task_running || s_ssl_cert) return;
+    if (s_last_https_attempt_ms != 0 && millis() - s_last_https_attempt_ms < HTTPS_RETRY_MS) return;
+
+    s_last_https_attempt_ms = millis();
+    s_ssl_cert_task_running = true;
+    serialmon_append("Generating HTTPS certificate...");
+    update_webdash_status();
+    xTaskCreate(task_create_ssl_cert, "meshcoreHttpsCert", 8192, NULL, 2, NULL);
+}
+
 #endif // ESP32
 
 // ── Public API ──────────────────────────────────────────────
@@ -645,9 +1223,12 @@ static void handle_rpt_delete(AsyncWebServerRequest* req, uint8_t* data, size_t 
 void webdash_init() {
 #if defined(ESP32)
     Preferences prefs;
-    prefs.begin("webdash", true);
-    g_webdash_enabled = prefs.getBool("enabled", false);
+    prefs.begin("webdash", false);
+    g_webdash_enabled = true;
+    prefs.putBool("enabled", true);
+    prefs.putBool("init", true);
     prefs.end();
+    update_webdash_status();
 #endif
 }
 
@@ -655,8 +1236,11 @@ void webdash_save_settings() {
 #if defined(ESP32)
     Preferences prefs;
     prefs.begin("webdash", false);
-    prefs.putBool("enabled", g_webdash_enabled);
+    g_webdash_enabled = true;
+    prefs.putBool("enabled", true);
+    prefs.putBool("init", true);
     prefs.end();
+    update_webdash_status();
 #endif
 }
 
@@ -669,6 +1253,10 @@ void webdash_start() {
         s_server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
             req->send_P(200, "text/html", INDEX_HTML);
         });
+        s_server.on("/position", HTTP_GET, handle_position_page);
+        s_server.on("/json/position", HTTP_GET, handle_position_json);
+        s_server.on("/json/position/set", HTTP_GET, handle_position_set);
+        s_server.on("/json/position/clear", HTTP_GET, handle_position_clear);
         s_server.on("/api/stats", HTTP_GET, handle_stats);
         s_server.on("/api/contacts", HTTP_GET, handle_contacts);
         s_server.on("/api/channels", HTTP_GET, handle_channels);
@@ -710,23 +1298,25 @@ void webdash_start() {
     s_server.begin();
     s_running = true;
 
-    char buf[64];
+    char buf[96];
     snprintf(buf, sizeof(buf), "Web dashboard at http://%s", WiFi.localIP().toString().c_str());
     serialmon_append(buf);
-    snprintf(s_status, sizeof(s_status), "http://%s:80", WiFi.localIP().toString().c_str());
-    g_deferred_features_dirty = true;
+    snprintf(buf, sizeof(buf), "Secure dashboard at https://%s", WiFi.localIP().toString().c_str());
+    serialmon_append(buf);
+    update_webdash_status();
 #endif
 }
 
 void webdash_stop() {
 #if defined(ESP32)
-    if (!s_running) return;
-    s_ws.closeAll();
-    s_server.end();
-    s_running = false;
-    snprintf(s_status, sizeof(s_status), "Stopped");
-    g_deferred_features_dirty = true;
-    serialmon_append("Web dashboard stopped");
+    if (s_running) {
+        s_ws.closeAll();
+        s_server.end();
+        s_running = false;
+        serialmon_append("Web dashboard stopped");
+    }
+    stop_secure_server();
+    update_webdash_status();
 #endif
 }
 
@@ -738,6 +1328,15 @@ void webdash_loop() {
         webdash_stop();
     }
     if (s_running) s_ws.cleanupClients();
+    if (g_webdash_enabled && g_wifi_connected) {
+        ensure_ssl_cert_task();
+        if (s_ssl_cert_ready && !s_secure_running) start_secure_server();
+    }
+    if (s_secure_running && s_secure_server) {
+        s_secure_server->loop();
+    } else if ((!g_wifi_connected || !g_webdash_enabled) && (s_secure_running || s_secure_server)) {
+        stop_secure_server();
+    }
 #endif
 }
 
@@ -749,26 +1348,6 @@ void webdash_broadcast_message(const char* source, const char* text, bool outgoi
     String key = "";
     if (target_key && target_key[0]) {
         key = target_key;
-    } else {
-        // Resolve from source name: contacts then channels
-        for (int i = 0; i < dd_contacts_count; i++) {
-            if (strcmp(dd_contacts[i].name, source) == 0) {
-                char pubhex[9];
-                snprintf(pubhex, sizeof(pubhex), "%02x%02x%02x%02x",
-                         dd_contacts[i].contact_id.pub_key[0], dd_contacts[i].contact_id.pub_key[1],
-                         dd_contacts[i].contact_id.pub_key[2], dd_contacts[i].contact_id.pub_key[3]);
-                key = String("c:") + pubhex;
-                break;
-            }
-        }
-        if (key.length() == 0) {
-            for (int i = 0; i < dd_channels_count; i++) {
-                if (strcmp(dd_channels[i].name, source) == 0) {
-                    key = String("h:") + String(dd_channels[i].channel_idx);
-                    break;
-                }
-            }
-        }
     }
 
     char buf[400];
@@ -780,10 +1359,5 @@ void webdash_broadcast_message(const char* source, const char* text, bool outgoi
 }
 
 const char* webdash_status_text() {
-    if (!g_webdash_enabled) return "Disabled";
-#if defined(ESP32)
-    if (!g_wifi_connected) return "WiFi required";
-    if (s_running) return s_status;
-#endif
-    return "Starting...";
+    return s_status;
 }
